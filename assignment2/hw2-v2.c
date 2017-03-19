@@ -2,13 +2,12 @@
 Author: Jessica Marie Barre
 Due Date: Sunday, March 19, 11:59:59 PM
 Name: TFTP Server
-Purpose:
+Purpose: To create a simple TFTP Server
 
 Implement a TFTP server according to RFC 1350.
 
 Your server should:
-- be able to support multiple connections at the same time by calling the
-  fork() system
+X concurrent using fork()
 - You MUST support the “octet” mode.
 - You should not implement the “mail” mode or the “netascii” mode.
 - Upon not receiving data for 1 second, your sender should
@@ -28,7 +27,6 @@ Your server should:
 
  */
 
-/* udp-server.c */
 
 /* To test this server, you can use the following
    command-line netcat tool:
@@ -39,65 +37,110 @@ Your server should:
    localhost; and the port number must match what
    the server reports.
 
+   Notes:
+
+   TFTP message:
+   - RRQ from client TransferModeFileName
+   - WRQ to Client or from clients Transfer..
+   - DATA to client
+   - ACK to client
+   - ERROR
+
+   - Clients sends a RRQ or WRQ to server
+   - server sends 0
+   - client sends Dat1
+   - repeat until done
  */
 
 #include <stdio.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-#define MAXBUFFER 8192
 
-int Sock(int sd) {
+#define MAXBUFFER 8192
+#define TFTP_OPCODE_RRQ		1
+#define TFTP_OPCODE_WRQ		2
+#define TFTP_OPCODE_DATA	3
+#define TFTP_OPCODE_ACK		4
+#define TFTP_OPCODE_ERROR	5
+
+#define TFTP_DEF_RETRIES	6
+#define TFTP_DEF_TIMEOUT_SEC	0
+#define TFTP_DEF_TIMEOUT_USEC	50000
+#define TFTP_BLOCKSIZE		512
+#define TFTP_MAX_MSGSIZE	(4 + TFTP_BLOCKSIZE)
+
+#define TFTP_MODE_OCTET		"octet"
+
+/**
+ * Helper function sock()
+ */
+int Sock() {
 	/* create the socket (endpoint) on the server side */
-	sd = socket(AF_INET, SOCK_DGRAM, 0);
+	int sd = socket(AF_INET, SOCK_DGRAM, 0);
 	/* UDP */
 	if (sd < 0)/* this will be part of the file descriptor table! */
 	{
 		perror("socket() failed");
 		exit(EXIT_FAILURE);
 	}
+
 	return sd;
 }
 
+/**
+ * Helper function bind()
+ */
 void Bind(int sd, const struct sockaddr_in* server) {
 	/* bind to a specific (OS-assigned) port number */
-	if (bind(sd, (struct sockaddr*) &*server, sizeof(*server)) < 0) {
+	if (bind(sd, (struct sockaddr*) server, sizeof(*server)) < 0) {
 		perror("bind() failed");
 		exit(EXIT_FAILURE);
+	} else {
+		printf("bind() success\n");
 	}
 }
 
+/**
+ * Helper function getsocketname()
+ */
 void GetSocketName(int sd, int length, struct sockaddr_in* server) {
-	if (getsockname(sd, (struct sockaddr*) &*server, (socklen_t*) &length)
+	if (getsockname(sd, (struct sockaddr*) server, (socklen_t*) &length)
 			< 0) {
 		perror("getsockname() failed");
 		exit(EXIT_FAILURE);
+	} else {
+		printf("getsocketname() success\n");
 	}
 }
 
 void Listen(int sd) {
-	if (listen(sd, 10) == -1) {
+	if (listen(sd, 5) == -1) {
 		perror("Error listening.\n");
 		exit(EXIT_FAILURE);
 	}
 }
 
-void connection(int bytes_read, char buffer[MAXBUFFER], int sd,
+/**
+ * connection() sends data to the client
+ */
+void handle_request(int bytes_read, char buffer[MAXBUFFER], int sd,
 		const struct sockaddr_in* client, int len) {
 	//sendFile here
-	printf("RCVD %d bytes\bytes_read", bytes_read);
-	printf("RCVD: [%s]\bytes_read", buffer);
+
 	/* echo the data back to the sender/client */
-	sendto(sd, buffer, bytes_read, 0, (struct sockaddr*) &*client, len);
-	/* this do..while loop exits when the recv() call
-	 returns 0, indicating the remote/client side has
-	 closed its socket */
-	printf("CHILD %d: Bye!\bytes_read", getpid());
-	close(sd);
-	exit(EXIT_SUCCESS); /* child terminates here! */
+
+	if (sendto(sd, buffer, bytes_read, 0, (struct sockaddr*) client, len)
+			< 0) {
+		perror("sendto() failed");
+		exit(EXIT_FAILURE);
+	}
+
 }
 
 int main()
@@ -107,63 +150,52 @@ int main()
 	int length;
 
 	/* create the socket (endpoint) on the server side */
-	sd = Sock(sd);
 
-	bzero(&server, sizeof(server));
+	sd = Sock();
+
 	server.sin_family = AF_INET;  /* IPv4 */
 	server.sin_addr.s_addr = htonl( INADDR_ANY );
 
-	/* specify the port number for the server */
-	server.sin_port = htons( 0 );  /* a 0 here means let the kernel assign
-                                    us a port number to listen on */
+	/* a 0 here means let the kernel assign
+       us a port number to listen on */
+	server.sin_port = htons( 0 );
 
 	/* bind to a specific (OS-assigned) port number */
 	Bind(sd, &server);
 
-	length = sizeof(server);
+	length = sizeof( server );
 	GetSocketName(sd, length, &server);
 
-	Listen(sd);
-
-	printf( "UDP server at port number %d\bytes_read", ntohs( server.sin_port ) );
-	printf( "UDP server at address %s\bytes_read", inet_ntoa( (struct in_addr)server.sin_addr));
-
+	printf( "UDP server at port number %d\n", ntohs( server.sin_port ) );
+	printf( "UDP server at address %s \n", inet_ntoa( (struct in_addr)server.sin_addr));
 
 	/* the code below implements the application protocol */
 	int bytes_read;
 	char buffer[ MAXBUFFER ];
 	struct sockaddr_in client;
 	int len = sizeof( client );
-	int pid;
-
-
 
 	while ( 1 )
 	{
-		printf( "UDP Server: waiting for connection...");
-
 		/* read a datagram from the remote client side (BLOCKING) */
 		bytes_read = recvfrom( sd, buffer, MAXBUFFER, 0, (struct sockaddr *) &client,
 				(socklen_t *) &len );
 
-
 		if ( bytes_read < 0 )
 		{
 			perror( "recvfrom() failed" );
-
-		} else if ( bytes_read == 0 ) {
-			printf( "CHILD %d: Rcvd 0 from recv(); closing socket\bytes_read",
-					getpid() );
-		} else {
-
-			// a connection has been established
+		}
+		else
+		{
 			buffer[bytes_read] = '\0';
-			printf( "Rcvd datagram from %s port %d\bytes_read",
-					inet_ntoa( client.sin_addr ), ntohs( client.sin_port ) );
 
-			/* handle new socket in a child process,
-		       allowing the parent process to immediately go
-		       back to the accept() call */
+			printf( "Rcvd datagram from %s port %d\n",
+					inet_ntoa( client.sin_addr ), ntohs( client.sin_port ) );
+			printf( "RCVD %d bytes\n", bytes_read );
+			printf( "RCVD: \"%s]\"", buffer );
+
+			int pid;
+
 			pid = fork();
 
 			if ( pid < 0 )
@@ -173,9 +205,12 @@ int main()
 			}
 			else if ( pid == 0 )
 			{
-				connection(bytes_read, buffer, sd, &client, len);
-				/* to do: check the return code of sendto() */
 
+				handle_request(bytes_read, buffer, sd, &client, len);
+
+				/* echo the data back to the sender/client */
+				sendto( sd, buffer, bytes_read, 0, (struct sockaddr *) &client, len );
+				/* to do: check the return code of sendto() */
 #if 0
 				sleep( 5 );
 #endif
@@ -185,12 +220,11 @@ int main()
 				/* parent simply closes the new client socket (endpoint) */
 				wait(NULL);
 				close( sd );
+				exit(EXIT_SUCCESS); /* child terminates here! */
 			}
+
 		}
-
-
-
-	} // end while
+	}
 
 	return EXIT_SUCCESS;
 }
