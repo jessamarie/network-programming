@@ -32,6 +32,7 @@ X concurrent using fork()
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <errno.h>
 
 
 #define PORT      0
@@ -43,8 +44,8 @@ X concurrent using fork()
 #define OPCODE_ACK		4
 #define OPCODE_ERROR	5
 
-#define TIMEOUT_NO_RECEIVE   1  // 1 sec
-#define TIMEOUT_ABORT        10 // 10 sec
+#define TIMEOUT_BREAK   1  // 1 sec
+#define TIMEOUT_ABORT   10 // 10 sec
 
 #define DEF_RETRIES	6
 #define DEF_TIMEOUT_SEC	0
@@ -186,54 +187,75 @@ int create_and_bind_socket(struct sockaddr_in* server) {
 }
 
 
-/** This function splits the contents of a string by a desired
- * delimiter
- *
+/** This function splits the contents of a string by the
+ * null terminator
  * @param str
- * @param delim
- * @param numtokens
- * @return a double char ** aray of the split tokens
+ * @param filename the filename to fill
+ * @param mode the mode to fill
+ * @return the number of tokens
  * **/
-char **strsplit(const char* str, const char* delim, size_t* numtokens) {
 
-	char *s = strdup(str);
-	size_t tokens_alloc = 1;
-	size_t tokens_used = 0;
+size_t get_tokens(char* str, char** filename, char** mode) {
 
-	char **tokens = calloc(tokens_alloc, sizeof(char*));
+	char *ptr = str;
+	int numtokens = 0;
 
-	char *token, *rest = s;
-
-	while ((token = strsep(&rest, delim)) != NULL) {
-
-
-		if (tokens_used == tokens_alloc) {
-			tokens_alloc *= 2;
-			tokens = realloc(tokens, tokens_alloc * sizeof(char*));
-		}
-
-
-		/* Skip last delimeter */
-
-		if(strcmp(token, "")) {
-			tokens[tokens_used++] = strdup(token);
-		}
-	}
-
-
-	if (tokens_used == 0) {
-		free(tokens);
-		tokens = NULL;
+	if (*ptr) {
+		*filename = strdup(ptr);
+		numtokens++;
 	} else {
-		tokens = realloc(tokens, tokens_used * sizeof(char*));
+		return -1;
 	}
 
-	*numtokens = tokens_used;
+	ptr += strlen(ptr) + 1;
 
-	free(s);
+	if (*ptr) {
+		*mode = strdup(ptr);
+		numtokens++;
+	} else {
+		return -1;
+	}
 
-	return tokens;
+	return numtokens;
 }
+
+
+/*
+ * Sends error code back to client
+ *
+ * 		  2by    2by        string     1by
+ * ERROR:  ---------------------------------
+ *       | 5 | ErrorCode |  ErrorMsg  | 0  |
+ *       -----------------------------------
+ *
+ * @param sd the socket descriptor
+ * @param block_num the block number
+ * @param msg the message to send back to the client
+ * @param client the client address
+ * @param len the length of the client address
+ * @return the number of bytes sent
+ */
+int send_error(int sd, uint16_t error_code, uint8_t* msg, struct sockaddr_in *client, socklen_t len) {
+
+	// TODO:
+	// ADD IF else for easier code
+	// ADD # for exit condition ex: if 1 exit(1)
+
+
+	tftp_message message;
+	int bytes_sent;
+
+	message.opcode = htons(OPCODE_ERROR);
+	message.error.error_code = htons(error_code);
+	memcpy(message.error.error_message, msg, sizeof(msg)/sizeof(uint8_t));
+
+	bytes_sent = sendto(sd, &message, sizeof(message.error), 0, (struct sockaddr *) client, len);
+
+	if(bytes_sent < 0) perror("sendto() failed: ERROR");
+
+	return bytes_sent;
+}
+
 
 /*
  * Retrieves a request and error checks
@@ -254,7 +276,217 @@ int get_packet(int sd, tftp_message *message, struct sockaddr_in *client, sockle
 
 	if (bytes_read < 0) perror("recvfrom() failed");
 
+	if(bytes_read < 4) {
+		perror(ERRMSG_BAD_PACKET);
+		send_error(sd, ERR_NOT_DEFINED, (uint8_t *) ERRMSG_BAD_PACKET, client, *len);
+	}
+
 	return bytes_read;
+}
+
+static void packet_alarm(int signo){
+	return;
+}
+
+/*
+ * Waits for a request and handles timeout
+ *
+ * @param sd the socket descriptor
+ * @param message the packet structure
+ * @param client the client address structure
+ * @param len the length of the client address
+ * @effect fills the message structure with a packet
+ *         from the client
+ * @return the number of bytes_read
+ */
+int retrieve_packet(int sd, tftp_message *message, uint16_t opcode, struct sockaddr_in *client, socklen_t *len) {
+
+	struct sigaction action;
+
+	int bytes_recieved = 0;
+
+	action.sa_handler = packet_alarm;
+
+	if (sigfillset(&action.sa_mask) < 0) return -1;
+
+	action.sa_flags = 0;
+
+	if (sigaction(SIGALRM,&action,0) < 0) return -1;
+
+	alarm(TIMEOUT_BREAK);
+
+	errno = 0;
+
+	while (1)
+	{
+
+		bytes_recieved = get_packet(sd, message, client, len);
+
+		if (errno != 0) {
+			if (errno == EINTR) printf("Timeout Occured.\n");
+			else printf("Errno with value[%d]\n",errno);
+
+			alarm(0);
+			return -1;
+		}
+
+		if (bytes_recieved < 0)
+		{
+			alarm(0);
+			return -1;
+		}
+
+		// redundant?
+		if (message->opcode == opcode)
+		{
+			alarm(0);
+			return bytes_recieved;
+		}
+		else if(message->opcode == OPCODE_ERROR)
+		{
+			alarm(0);
+			return 0;
+		}
+	}
+	//should never reach this
+	alarm(0);
+	return -1;
+}
+
+/*
+ * Gets an ACK upon recieving a read request and error checks
+ *
+ *              2by             2by
+ * ACK:  -----------------------------------
+ *       |       4        |    Block #     |
+ *       -----------------------------------
+ *
+ * @param sd the socket descriptor
+ * @param block_num the block number it should be
+ * @param client the client address
+ * @param len the client address length
+ * @return the number of bytes receieved
+ */
+int get_ack(int sd, uint8_t block_num, struct sockaddr_in *client, socklen_t len) {
+
+	tftp_message message;
+	int timeouts = 0;
+
+	int bytes_received = retrieve_packet(sd, &message, OPCODE_ACK, client, &len);
+
+	//get_packet(sd, &message, client, &len);
+
+	if (bytes_received < 0) {
+		if (timeouts > TIMEOUT_ABORT) {
+			// error timeout limit reached
+			exit(EXIT_FAILURE);
+		}
+
+		timeouts++;
+
+	} else {
+
+		if (bytes_received < 4) exit(EXIT_FAILURE);
+
+		printf("bytes recieved: %d\n", bytes_received); //debugging
+
+		uint16_t opcode = ntohs(message.opcode);
+
+		printf("opcode is %d\n", opcode); //debugging
+
+		if(opcode == OPCODE_ERROR) {
+			perror(ERRMSG_ERROR_RECEIVED);
+			send_error(sd, message.error.error_code, message.error.error_message, client, len);
+			exit(EXIT_FAILURE);
+		}
+
+		if (opcode != OPCODE_ACK) {
+			perror(ERRMSG_ILLEGAL_OP);
+			send_error(sd, ERR_ILLEGAL_OP, (uint8_t *) ERRMSG_ILLEGAL_OP, client, len);
+			exit(EXIT_FAILURE);
+		}
+
+		//debugging
+		printf("blockum is %d\n", block_num);
+		printf("ack blocknum is %d\n", ntohs(message.ack.block_num));
+
+		if (block_num != ntohs(message.ack.block_num)) {
+			perror(ERRMSG_BAD_PACKET);
+			send_error(sd, ERR_UNKNOWN_TID, (uint8_t *) ERRMSG_BAD_PACKET, client, len);
+			exit(EXIT_FAILURE);
+		}
+
+	}
+
+	return bytes_received;
+}
+
+/*
+ * Gets data from the client
+ *
+ *		   2by     2by		  n bytes
+ * DATA:  ----------------------------------
+ *       |  3  | block # |      DATA       |
+ *       -----------------------------------
+ *
+ * @param sd the socket descriptor
+ * @param block_num the block number
+ * @param data the file contents to send back to the client
+ * @param client the client address
+ * @param len the length of the client address
+ * @return the number of bytes sent
+ */
+int get_data(int sd, uint8_t block_num, tftp_message* message, struct sockaddr_in *client, socklen_t len) {
+
+	int timeouts = 0;
+
+	int bytes_received = retrieve_packet(sd, message, OPCODE_DATA, client, &len);
+
+	//get_packet(sd, &message, client, &len);
+
+	if (bytes_received < 0) {
+		if (timeouts > TIMEOUT_ABORT) {
+			// error timeout limit reached
+			exit(EXIT_FAILURE);
+		}
+
+		timeouts++;
+
+	} else {
+
+		if (bytes_received < 4) exit(EXIT_FAILURE);
+
+		printf("ACK recieved: %d\n", bytes_received); //debugging
+
+		uint16_t opcode = ntohs(message->opcode);
+
+		printf("opcode is %d\n", opcode); //debugging
+
+		if(opcode == OPCODE_ERROR) {
+			perror(ERRMSG_ERROR_RECEIVED);
+			send_error(sd, message->error.error_code, message->error.error_message, client, len);
+			exit(EXIT_FAILURE);
+		}
+
+		if (opcode != OPCODE_DATA) {
+			perror(ERRMSG_ILLEGAL_OP);
+			send_error(sd, ERR_ILLEGAL_OP, (uint8_t *) ERRMSG_ILLEGAL_OP, client, len);
+			exit(EXIT_FAILURE);
+		}
+
+		//debugging
+		printf("blockum is %d\n", block_num);
+		printf("ack blocknum is %d\n", ntohs(message->ack.block_num));
+
+		if (block_num != ntohs(message->ack.block_num)) {
+			perror(ERRMSG_BAD_PACKET);
+			send_error(sd, ERR_UNKNOWN_TID, (uint8_t *) ERRMSG_BAD_PACKET, client, len);
+			exit(EXIT_FAILURE);
+		}
+
+	}
+
+	return bytes_received;
 }
 
 
@@ -289,38 +521,6 @@ int send_ack(int sd, uint16_t block_num, struct sockaddr_in *client, socklen_t l
 
 
 /*
- * Sends error code back to client
- *
- * 		  2by    2by        string     1by
- * ERROR:  ---------------------------------
- *       | 5 | ErrorCode |  ErrorMsg  | 0  |
- *       -----------------------------------
- *
- * @param sd the socket descriptor
- * @param block_num the block number
- * @param msg the message to send back to the client
- * @param client the client address
- * @param len the length of the client address
- * @return the number of bytes sent
- */
-int send_error(int sd, uint16_t error_code, char* msg, struct sockaddr_in *client, socklen_t len) {
-
-	tftp_message message;
-	int bytes_sent;
-
-	message.opcode = htons(OPCODE_ERROR);
-	message.error.error_code = htons(error_code);
-	memcpy(message.error.error_message, msg, sizeof(msg));
-
-	bytes_sent = sendto(sd, &message, sizeof(message.error), 0, (struct sockaddr *) client, len);
-
-	if(bytes_sent < 0) perror("sendto() failed: ERROR");
-
-	return bytes_sent;
-}
-
-
-/*
  * Sends data back to client
  *
  *		   2by     2by		  n bytes
@@ -335,14 +535,14 @@ int send_error(int sd, uint16_t error_code, char* msg, struct sockaddr_in *clien
  * @param len the length of the client address
  * @return the number of bytes sent
  */
-int send_data(int sd, uint16_t block_num, char* data, struct sockaddr_in *client, socklen_t len) {
+int send_data(int sd, uint16_t block_num, uint8_t* data, int bytes_read, struct sockaddr_in *client, socklen_t len) {
 
 	tftp_message message;
 	int bytes_sent;
 
 	message.opcode = htons(OPCODE_DATA);
 	message.data.block_num = htons(block_num);
-	memcpy(message.data.data, data, sizeof(data));
+	memcpy(message.data.data, data, bytes_read+4);
 
 	bytes_sent = sendto(sd, &message, sizeof(message.data), 0, (struct sockaddr *) client, len);
 
@@ -371,7 +571,7 @@ int read_data(int sd, char * filename, struct sockaddr_in* client, socklen_t len
 	if( access( filename, F_OK | R_OK) != 0)
 	{
 		perror(ERRMSG_FILE_NOT_FOUND);
-		send_error(sd, ERR_FILE_NOT_FOUND, ERRMSG_FILE_NOT_FOUND, client, len);
+		send_error(sd, ERR_FILE_NOT_FOUND, (uint8_t *) ERRMSG_FILE_NOT_FOUND, client, len);
 		exit(EXIT_FAILURE);
 	}
 
@@ -380,51 +580,36 @@ int read_data(int sd, char * filename, struct sockaddr_in* client, socklen_t len
 		exit(EXIT_FAILURE);
 	}
 
-	/** get the total bytes in the file **/
-	// NEEDED?
-	fseek(file, 0, SEEK_END);
-	long int file_len = ftell(file);
-	rewind(file);
 
 	int bytes_sent = 0;
 	int bytes_read = 0;
 
 	do {
-		char* data;
-		tftp_message message;
-		uint16_t opcode;
+		uint8_t* data2 = (uint8_t *) malloc(sizeof(uint8_t) * BLOCKSIZE);
+
+		char data[BLOCKSIZE];
 
 		bytes_read = fread(data, sizeof(char), BLOCKSIZE, file);
+
+		data[bytes_read] = '\0';
+		// debugging
+		printf("bytes_read %d\n", bytes_read);
+		printf("%s\n", data);
+		printf(" Bytes written: %lu\n", sizeof(data));
+		printf(" Bytes written: %lu\n", strlen(data));
+
+
 		block_num++;
 
 		/** send block to client **/
-		bytes_sent = send_data(sd, block_num, data, client, len);
+
+		bytes_sent = send_data(sd, block_num, data, bytes_read, client, len);
 
 		if (bytes_sent < 0) exit(EXIT_FAILURE);
 
-		int bytes_recieved = get_packet(sd, &message, client, &len);
+		int bytes_received = get_ack(sd, block_num, client, len);
 
-		printf("bytes recieved: %d\n", bytes_recieved); //debugging
-
-		opcode = ntohs(message.opcode);
-
-		if(opcode == OPCODE_ERROR) {
-			perror(ERRMSG_ERROR_RECEIVED);
-			send_error(sd, message.error.error_code, message.error.error_message, client, len);
-			exit(EXIT_FAILURE);
-		}
-
-
-		if (opcode != OPCODE_ACK) {
-			perror(ERRMSG_ILLEGAL_OP);
-			send_error(sd, ERR_ILLEGAL_OP, ERRMSG_ILLEGAL_OP, client, len);
-			exit(EXIT_FAILURE);
-		}
-
-		// block number checking
-		// message.bn == block_num
-
-	} while (bytes_sent == MAX_MSGSIZE);
+	} while (bytes_read == BLOCKSIZE);
 	// Only last data contents < 512
 	// MAybe add ifEnd?
 
@@ -457,7 +642,7 @@ int write_data(int sd, char* filename, struct sockaddr_in* client, socklen_t len
 	if( access( filename, F_OK ) == 0)
 	{
 		perror(ERRMSG_FILE_EXISTS);
-		send_error(sd, ERR_FILE_EXISTS, ERRMSG_FILE_EXISTS, client, len);
+		send_error(sd, ERR_FILE_EXISTS, (uint8_t *) ERRMSG_FILE_EXISTS, client, len);
 		exit(EXIT_FAILURE);
 	}
 
@@ -470,32 +655,26 @@ int write_data(int sd, char* filename, struct sockaddr_in* client, socklen_t len
 	int bytes_read = 0;
 
 	do {
+
 		tftp_message message;
 		uint16_t opcode;
 
 		send_ack(sd, block_num, client, len);
 
-		bytes_read = get_packet(sd, &message, client, &len);
+		bytes_read = get_data(sd, block_num, &message, client, len);
+
+		//get_packet(sd, &message, client, &len);
+
+		// if bytes_read < 4 break?
 
 		block_num++;
 
-		opcode = ntohs(message.opcode);
-
-		if(opcode == OPCODE_ERROR) {
-			perror(ERRMSG_ERROR_RECEIVED);
-			send_error(sd, message.error.error_code, message.error.error_message, client, len);
-			exit(EXIT_FAILURE);
-		}
-
-		if (opcode != OPCODE_DATA) {
-			perror(ERRMSG_ILLEGAL_OP);
-			send_error(sd, ERR_ILLEGAL_OP, ERRMSG_ILLEGAL_OP, client, len);
-			exit(EXIT_FAILURE);
-		}
+		printf("Bytes to write: %d\n", bytes_read - 4); //debugging
+		printf("%s\n", message.data.data);
 
 		// block number checking?
 
-		int bytes_written = fwrite(message.data.data, sizeof(char), strlen(message.data.data), file);
+		int bytes_written = fwrite(message.data.data, sizeof(char), bytes_read - 4, file);
 
 		if (bytes_written < 0) {
 			perror("fwrite() failed");
@@ -540,11 +719,11 @@ void handle_request(tftp_message *message,
 	uint16_t opcode;
 
 	size_t numtokens;
-	char ** parts;
+	//char ** parts;
 
 	client_sd = Sock();
 
-	tv.tv_sec  = TIMEOUT_NO_RECEIVE;
+	tv.tv_sec  = TIMEOUT_BREAK;
 	tv.tv_usec = 0;
 
 	/** Set the max time period a function waits til it completes **/
@@ -553,26 +732,21 @@ void handle_request(tftp_message *message,
 		exit(EXIT_FAILURE);
 	}
 
-	parts = strsplit(message->request.data, "/0", &numtokens);
-
-	printf("numtokens %lu\n", numtokens);
+	numtokens = get_tokens((char *) message->request.data, &filename, &mode);
 
 	if (numtokens  != 2) {
 		perror(ERRMSG_BAD_PACKET);
-		send_error(client_sd, ERR_NOT_DEFINED, ERRMSG_BAD_PACKET, client, len);
+		send_error(client_sd, ERR_NOT_DEFINED, (uint8_t *) ERRMSG_BAD_PACKET, client, len);
 		exit(EXIT_FAILURE);
 	}
 
-	mode = parts[1];
-
 	if (strcasecmp(mode, MODE_OCTET) != 0) {
 		perror(ERRMSG_INVALID_MODE);
-		send_error(client_sd, ERR_NOT_DEFINED, ERRMSG_INVALID_MODE, client, len);
+		send_error(client_sd, ERR_NOT_DEFINED, (uint8_t *) ERRMSG_INVALID_MODE, client, len);
 		exit(EXIT_FAILURE);
 	}
 
 	opcode = ntohs(message->opcode);
-	filename = parts[0];
 
 	if(opcode == OPCODE_RRQ) {
 
@@ -614,22 +788,21 @@ int main()
 
 		bytes_read = get_packet(sd, &message, &client, (socklen_t *) &clilen);
 
-		if(bytes_read < 0) continue;
-
-		if(bytes_read < 4) {
-			perror(ERRMSG_BAD_PACKET);
-			send_error(sd, ERR_NOT_DEFINED, ERRMSG_BAD_PACKET, &client, clilen);
-			continue;
-		}
+		if(bytes_read < 4) continue;
 
 		//debugging
+
+#if 0
 		printf( "Rcvd datagram from %s port %d\n",
 				inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 		printf("RCVD %d bytes\n", bytes_read);
+#endif
 
 		opcode = ntohs(message.opcode);
 
-		printf( "RCVD: Opcode:\"%d \n", opcode);
+#if 0
+		printf( "RCVD: Opcode:\"%d \n", opcode); //deubugging
+#endif
 
 		if (opcode == OPCODE_RRQ || opcode == OPCODE_WRQ) {
 
@@ -637,14 +810,14 @@ int main()
 
 			if ( pid < 0 )
 			{
-				perror( "fork() failed" );
+				perror("fork() failed");
 				return EXIT_FAILURE;
 			}
 			else if ( pid == 0 ) /* CHILD */
 			{
 				/* no longer need parent socket in the child */
 
-				// close(sd);
+				close(sd);
 
 				/* Exchange ADDITIONAL datagrams w/ client on new socket */
 
@@ -658,14 +831,14 @@ int main()
 			}
 			else /* pid > 0   PARENT */
 			{
-				/* parent simply closes the new client socket (endpoint) */
+				/* parent waits for child to terminate */
+
 				wait(NULL);
-				close( sd );
 			}
 
 		} else {
 			perror(ERRMSG_ILLEGAL_OP);
-			send_error(sd, ERR_ILLEGAL_OP, ERRMSG_ILLEGAL_OP, &client, clilen);
+			send_error(sd, ERR_ILLEGAL_OP, (uint8_t *) ERRMSG_ILLEGAL_OP, &client, clilen);
 		}
 
 	} // end while
