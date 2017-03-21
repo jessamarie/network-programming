@@ -585,9 +585,9 @@ int read_data(int sd, char * filename, struct sockaddr_in* client, socklen_t len
 	int bytes_read = 0;
 
 	do {
-		uint8_t* data2 = (uint8_t *) malloc(sizeof(uint8_t) * BLOCKSIZE);
+		//uint8_t* data2 = (uint8_t *) malloc(sizeof(uint8_t) * BLOCKSIZE);
 
-		char data[BLOCKSIZE];
+		uint8_t data[BLOCKSIZE];
 
 		bytes_read = fread(data, sizeof(char), BLOCKSIZE, file);
 
@@ -596,7 +596,7 @@ int read_data(int sd, char * filename, struct sockaddr_in* client, socklen_t len
 		printf("bytes_read %d\n", bytes_read);
 		printf("%s\n", data);
 		printf(" Bytes written: %lu\n", sizeof(data));
-		printf(" Bytes written: %lu\n", strlen(data));
+		printf(" Bytes written: %lu\n", sizeof(data)/sizeof(uint8_t));
 
 
 		block_num++;
@@ -661,11 +661,14 @@ int write_data(int sd, char* filename, struct sockaddr_in* client, socklen_t len
 
 		send_ack(sd, block_num, client, len);
 
-		bytes_read = get_data(sd, block_num, &message, client, len);
+		//bytes_read = get_data(sd, block_num, &message, client, len);
 
-		//get_packet(sd, &message, client, &len);
+		bytes_read = get_packet(sd, &message, client, &len);
 
-		// if bytes_read < 4 break?
+		if (bytes_read < 4) {
+		perror("serious issues here\n");
+                  exit(EXIT_FAILURE); 
+                }
 
 		block_num++;
 
