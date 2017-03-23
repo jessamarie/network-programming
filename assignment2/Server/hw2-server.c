@@ -371,9 +371,10 @@ int get_ack(int sd, uint8_t block_num, struct sockaddr_in *client, socklen_t len
 	tftp_message message;
 	int timeouts = 0;
 
+  /* ISSUE with timeouts here **/
+	//int bytes_received =  get_packet(sd, &message, client, &len);
 	int bytes_received = retrieve_packet(sd, &message, OPCODE_ACK, client, &len);
 
-	//get_packet(sd, &message, client, &len);
 
 	if (bytes_received < 0) {
 		if (timeouts > TIMEOUT_ABORT) {
@@ -387,11 +388,7 @@ int get_ack(int sd, uint8_t block_num, struct sockaddr_in *client, socklen_t len
 
 		if (bytes_received < 4) exit(EXIT_FAILURE);
 
-		printf("bytes recieved: %d\n", bytes_received); //debugging
-
 		uint16_t opcode = ntohs(message.opcode);
-
-		printf("opcode is %d\n", opcode); //debugging
 
 		if(opcode == OPCODE_ERROR) {
 			send_error(sd, message.error.error_code, (char *) message.error.error_message, client, len);
@@ -402,10 +399,6 @@ int get_ack(int sd, uint8_t block_num, struct sockaddr_in *client, socklen_t len
 			send_error(sd, ERR_ILLEGAL_OP, ERRMSG_ILLEGAL_OP, client, len);
 			exit(EXIT_FAILURE);
 		}
-
-		//debugging
-		printf("blockum is %d\n", block_num);
-		printf("ack blocknum is %d\n", ntohs(message.ack.block_num));
 
 		if (block_num != ntohs(message.ack.block_num)) {
 			send_error(sd, ERR_UNKNOWN_TID,ERRMSG_BAD_PACKET, client, len);
@@ -437,8 +430,6 @@ int get_data(int sd, uint8_t block_num, tftp_message* message, struct sockaddr_i
 	int timeouts = 0;
 
 	int bytes_received = retrieve_packet(sd, message, OPCODE_DATA, client, &len);
-
-	//get_packet(sd, &message, client, &len);
 
 	if (bytes_received < 0) {
 		if (timeouts > TIMEOUT_ABORT) {
@@ -506,6 +497,10 @@ int send_ack(int sd, uint16_t block_num, struct sockaddr_in *client, socklen_t l
 	message.opcode = htons(OPCODE_ACK);
 	message.ack.block_num = htons(block_num);
 
+	//debugging
+	printf("blockum is %d\n", block_num);
+	printf("ack blocknum is %d\n", ntohs(message.ack.block_num));
+
 	bytes_sent = sendto(sd, &message, sizeof(message.ack), 0, (struct sockaddr *) client, len);
 
 	if(bytes_sent < 0) perror("sendto() failed: ACK");
@@ -538,12 +533,10 @@ int send_data(int sd, uint16_t block_num, uint8_t* data, ssize_t bytes_read, str
 	message.data.block_num = htons(block_num);
 	memcpy(message.data.data, data, bytes_read);
 
-	printf("message data is %s\n", message.data.data );
-
 	bytes_sent = sendto(sd, &message, bytes_read+4, 0, (struct sockaddr *) client, len);
 
 	if(bytes_sent < 0) perror("sendto() failed: DATA");
-	printf("%d\n", bytes_sent);
+	printf("BYTES SENT: %d\n", bytes_sent);
 
 	return bytes_sent;
 }
@@ -562,6 +555,8 @@ int send_data(int sd, uint16_t block_num, uint8_t* data, ssize_t bytes_read, str
  */
 int read_data(int sd, char * filename, struct sockaddr_in* client, socklen_t len) {
 
+	printf("\nClient wants to recieve a file....\n");
+
 	FILE *file;
 	uint16_t block_num = 0;
 
@@ -571,11 +566,8 @@ int read_data(int sd, char * filename, struct sockaddr_in* client, socklen_t len
 		exit(EXIT_FAILURE);
 	}
 
-	if ((file = fopen(filename, "r")) == NULL) {
-		perror("Error: fopen() failed");
-		exit(EXIT_FAILURE);
-	}
-
+  file = fopen(filename, "r");
+	if (file == NULL) { perror("Error: fopen() failed"); exit(EXIT_FAILURE); }
 
 	ssize_t bytes_sent = 0;
 	ssize_t bytes_read = 0;
@@ -589,33 +581,29 @@ int read_data(int sd, char * filename, struct sockaddr_in* client, socklen_t len
 		bytes_read = fread(data, sizeof(char), BLOCKSIZE, file);
 		block_num++;
 
-		printf("bytes_read %lu\n", bytes_read);
+		printf("BYTES READ from file: %lu\n", bytes_read);
 
 		if (bytes_read < 4) { exit(EXIT_FAILURE);}
 
 		//data[bytes_read] = '\0';
-
 		data = (uint8_t *) realloc(data, bytes_read * sizeof(uint8_t));
+
 		// debugging
-		printf("%s\n", data);
-		//printf("Bytes written: %u\n", strlen(data));
-		//printf(" Bytes written: %lu\n", sizeof(data)/sizeof(uint8_t));
-
-
+		printf("DATA READ from file: %s", data);
 
 		/** send block to client **/
-
 		bytes_sent = send_data(sd, block_num, data, bytes_read, client, len);
-		printf("Bytes sent: %lu\n", bytes_sent);
+
+		printf("BYTES SENT to client: %lu\n", bytes_sent);
 		if (bytes_sent < 0) exit(EXIT_FAILURE);
-		printf("beforeerror?\n");
+
 		get_ack(sd, block_num, client, len);
 
 	} while (bytes_read == BLOCKSIZE);
 	// Only last data contents < 512
 	// MAybe add ifEnd?
 
-	printf("%s.%u: transfer completed\n",
+	printf("%s.%u: File successfully Sent\n",
 			inet_ntoa(client->sin_addr), ntohs(client->sin_port));
 
 	fclose(file);
@@ -638,6 +626,8 @@ int read_data(int sd, char * filename, struct sockaddr_in* client, socklen_t len
  */
 int write_data(int sd, char* filename, struct sockaddr_in* client, socklen_t len) {
 
+	printf("\nclient wants to transfer file to server...\n");
+
 	FILE *file;
 	uint16_t block_num = 0;
 
@@ -647,7 +637,7 @@ int write_data(int sd, char* filename, struct sockaddr_in* client, socklen_t len
 		exit(EXIT_FAILURE);
 	}
 
-	file = fopen(filename, "wb")
+	file = fopen(filename, "wb");
 	if (file == NULL) { perror("Error: fopen() failed"); exit(EXIT_FAILURE);}
 
 	int bytes_read = 0;
@@ -656,28 +646,31 @@ int write_data(int sd, char* filename, struct sockaddr_in* client, socklen_t len
 
 		tftp_message message;
 
+		/* Send ACK to client BEFORE recieving DATA */
 		send_ack(sd, block_num, client, len);
 
-		//bytes_read = get_data(sd, block_num, &message, client, len);
-
-		bytes_read = get_packet(sd, &message, client, &len);
+		/* ISSUE with timeouts here **/
+		bytes_read = get_data(sd, block_num, &message, client, len);
+		//bytes_read = get_packet(sd, &message, client, &len);
 
 		if (bytes_read < 4) { perror("serious issues here\n"); exit(EXIT_FAILURE); }
 
 		block_num++;
 
-		printf("Bytes to write: %d\n", bytes_read - 4); //debugging
-		printf("%s\n", message.data.data);
-
-		// block number checking?
-
 		int bytes_written = fwrite(message.data.data, sizeof(char), bytes_read - 4, file);
+
+		printf("BYTES written to server: %d\n", bytes_written);
+		printf("DATA Written: %s", message.data.data);
 
 		if (bytes_written < 0) { perror("fwrite() failed"); exit(EXIT_SUCCESS); }
 
 	} while (bytes_read == MAX_MSGSIZE);
 	// Only last data contents < 512
 	// MAybe add ifEnd?
+
+   /* LAST ACK */
+	send_ack(sd, block_num, client, len);
+
 
 	printf("%s.%u: File successfully transfered!\n",
 			inet_ntoa(client->sin_addr), ntohs(client->sin_port));
@@ -749,6 +742,7 @@ void handle_request(tftp_message *message,
 		write_data(client_sd, filename, client, len);
 	}
 
+	printf("Closing client socket...\n");
 	close(client_sd);
 
 }
