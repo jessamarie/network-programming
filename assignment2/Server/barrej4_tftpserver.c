@@ -624,9 +624,8 @@ int main()
 
 	/* create the socket (endpoint) and bind on the server side */
 	sd = create_and_bind_socket(&server);
-	printf("UDP server at port number %d and address %s\n",
-			ntohs(server.sin_port),
-			inet_ntoa((struct in_addr)server.sin_addr));
+	printf("%d\n",
+			ntohs(server.sin_port));
 
 
 	/* Implement the application protocol */
@@ -645,12 +644,6 @@ int main()
 		bytes_read = Recvfrom(sd, &message, &client, (socklen_t *) &clilen);
 
 		if(bytes_read < 4) continue;
-
-#if 0
-		printf( "Rcvd datagram from %s port %d\n",
-				inet_ntoa(client.sin_addr), ntohs(client.sin_port));
-		printf("RCVD %d bytes\n", bytes_read);
-#endif
 
 		opcode = ntohs(message.opcode);
 
