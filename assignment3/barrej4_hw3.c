@@ -42,12 +42,14 @@ N                   Primes
 #include <stdio.h>
 #include <stdint.h>
 #include <signal.h>
+#include <unistd.h>
+
 
 int end_now = 0;
 int START = 1;
 int TEN = 10;
 int TWO = 2;
-int MAX = 2147483647;
+unsigned int MAX = 4294967291;
 
 /* get_primes returns the number of primes
 between 1 and num.
@@ -59,9 +61,9 @@ p_count is the number of processes
 returns the number of primes between 1 and N
 */
 
-int is_prime(int num) {
+int is_prime(unsigned int num) {
 
-  int j;
+  unsigned int j;
   int prime = 1;
 
   for ( j = 2; j < num; j++) {
@@ -76,7 +78,7 @@ int is_prime(int num) {
     return prime;
 }
 
-int is_power(int num, int y) {
+int is_power(unsigned int num, int y) {
 
   while (num % y == 0) {
     num /= 10;
@@ -110,9 +112,11 @@ int main(int argc, char **argv)
 
     signal(SIGUSR1, sig_handler);
 
+    close(2); //closes stderr
+
     while (1) {
 
-      int i;
+      unsigned int i;
 
       for (i = id + TWO; i <= MAX; i = i+count) {
 
@@ -120,7 +124,7 @@ int main(int argc, char **argv)
         current_primes += is_prime(i);
 
         if (i <= 10) {
-          printf("process %d with i=%d and primes %d\n", id, i, current_primes);
+        //  printf("process %d with i=%d and primes %d\n", id, i, current_primes);
         }
 
         if (is_power(i, TEN)) {
@@ -131,8 +135,9 @@ int main(int argc, char **argv)
           MPI_COMM_WORLD );
 
         if (end_now == 1) {
-          printf("timeout\n");
-          printf("%8d  %8d\n", i, primes);
+          if(id == 0) {
+            printf("%8d  %8d\n", i, primes);
+          }
           break;
         }
 
