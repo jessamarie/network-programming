@@ -7,33 +7,27 @@
 
 /***** Goals ****
 
-- Program should return the number of unique primes
-  within a time limit
-- The sizeable amounts of computation make this problem
-a good candidate for parallelizing via MPI.
-- Fortunately, there is very little coordination required among the different ranks although the primes should be printed out in order.
-- Additionally, should you exhaust all
-(unsigned) 32-bit primes, your program can stop.
-- Otherwise, a signal will be sent to your program after a
-fixed amount of time (likely 1-2 minutes).
--  Also please include a speedup graph as the number of ranks is increased and explain any unexpected results. Hopefully everyone can run their program on 1, 2, and 4 cores at least
-
 - USE OPEN MPI
-
-So we don’t anger the Submitty gods, instead of saving gigabytes of integers, we can instead
-use the number of primes less than a specific value as the following output demonstrates:
-
-Sample output given below:
-
-timeout -s 10 5 mpirun -np 2 ./find-primes
-
-bash$ mpirun-openmpi-mp -np 2 ./a.out
+- Return # of Unique primes w/in timelimit in format:
 N                   Primes
 10                    4
 100                   25
 1000                  168
 <Signal received>
 1020                171
+
+- Parallelize
+- Should you exhaust all (unsigned) 32-bit primes, your program can stop.
+- Otherwise, a signal will be sent to your program after a
+fixed amount of time (likely 1-2 minutes).
+-  Also please include a speedup graph
+showing ranks vs # of primes found.  explain any unexpected results.
+
+Commit with:
+mpicc -g -Wall -o mpi_primes barrej4_hw3.c
+Run with:
+timeout -s 10 5 mpirun -np 1 ./mpi_primes
+
 
 */
 
