@@ -40,19 +40,15 @@ timeout -s 10 5 mpirun -np 1 ./mpi_primes
 
 
 int end_now = 0;
-int START = 1;
 int TEN = 10;
 int TWO = 2;
 unsigned int MAX = 4294967291;
+unsigned int highest_num = 0;
 
-/* get_primes returns the number of primes
-between 1 and num.
+/* is_prime checks if a number is prime.
 
-num is the highest number
-id is the id of the process
-p_count is the number of processes
-
-returns the number of primes between 1 and N
+@param num is the number to check
+@return 0 if composite, or 1 if prime
 */
 
 int is_prime(unsigned int num) {
@@ -72,6 +68,52 @@ int is_prime(unsigned int num) {
     return prime;
 }
 
+
+/*
+  find_primes finds the total number of primes from a given lo 
+  to a given hi, with the help of a set number of cpus.
+  
+  @param lo the number to start from
+  @param hi, the number to end at
+  @param p_count the number of processes
+  @param id the current rank
+  @effect if a timeout occurs, set the current lo to the final number 
+          achieved.
+  @ return the total number of primes from lo to hi
+*/
+
+int find_primes(unsigned int *lo, unsigned int hi, int total_primes, int p_count, int id) {
+  
+  int primes = 0;
+  int inc = p_count*2;
+  unsigned int i;
+  
+  for (i = *lo; i <= hi; i = i+inc) {
+    
+    // check if prime
+    primes += is_prime(i);
+    
+    if (end_now == 1) {
+      MPI_Bcast ( &end_now, 1, MPI_INT, id, MPI_COMM_WORLD );
+
+      *lo = i; // to get the highest number reached
+      return total_primes + primes;
+    }
+    
+  }
+  
+  return total_primes + primes;
+  
+}
+
+/* is_power checks if a number num is a power
+    of y.
+    
+    @param num, the number to check
+    @param y, the power
+    @return 0 if false, 1 if true.
+
+*/
 int is_power(unsigned int num, int y) {
 
   while (num % y == 0) {
@@ -83,6 +125,10 @@ int is_power(unsigned int num, int y) {
   return 0;
 }
 
+/* sig_handler is the signal 
+    handler
+
+*/
 void sig_handler(int signo)
 {
     if (signo == SIGUSR1) {
@@ -105,44 +151,53 @@ int main(int argc, char **argv)
     }
 
     signal(SIGUSR1, sig_handler);
+    
+    unsigned int curr_hi = TEN;
+    unsigned int curr_lo = (id * 2) + 1;
 
-    close(2); //closes stderr
 
     while (1) {
-
-      unsigned int i;
-
-      for (i = id + TWO; i <= MAX; i = i+count) {
-
-        // check if prime
-        current_primes += is_prime(i);
-
-        if (i <= 10) {
-        //  printf("process %d with i=%d and primes %d\n", id, i, current_primes);
-        }
-
-        if (is_power(i, TEN)) {
-          printf ( "%8d  %8d\n", i, primes);
-        }
-
-        MPI_Reduce ( &current_primes, &primes, 1, MPI_INT, MPI_SUM, 0,
+      
+     // MPI_Bcast ( &curr_lo, 1, MPI_INT, 0, MPI_COMM_WORLD );
+      
+      current_primes = find_primes(&curr_lo, curr_hi, current_primes, count, id);
+      
+      // gets the sum of all primes found across processes
+      MPI_Reduce ( &current_primes, &primes, 1, MPI_INT, MPI_SUM, 0,
           MPI_COMM_WORLD );
-
-        if (end_now == 1) {
-          if(id == 0) {
-            printf("%8d  %8d\n", i, primes);
-          }
-          break;
-        }
-
-      }
-
+          
+      // gets the maximum number reached so far
+      MPI_Reduce ( &curr_lo, &highest_num, 1, MPI_INT, MPI_MAX, 0, 
+          MPI_COMM_WORLD );
+      
       if (end_now == 1) {
+        
+        // print out the most recent prime
+        if (id == 0) {
+          printf("%8d %8d\n", highest_num, primes);
+        }
+        break;
+      } else if ( id == 0) {
+        // print out current primes at every power of 10
+          printf ( "%8d  %8d\n", curr_hi, primes);
+      }
+        
+      if (curr_lo == MAX) {
+        printf("%8d  %8d\n", MAX, primes);
         break;
       }
-
+      
+      // move up the current low and multiply hi by a factor of 10
+      curr_lo = (id * 2) + curr_hi + 1;
+      if (curr_hi * TEN < MAX) {
+        curr_hi = curr_hi * TEN;
+      } else {
+        curr_hi = MAX;
+      }
+      
     }
-
+    
+    // Finished
     MPI_Finalize();
 
     return 0;
