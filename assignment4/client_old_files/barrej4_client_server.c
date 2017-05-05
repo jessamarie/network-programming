@@ -5,21 +5,20 @@
 */
 
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <fcntl.h>
+//#include <sys/types.h>
+//#include <fcntl.h>
+//#include <sys/socket.h>
+//#include <netinet/in.h>
+//#include <assert.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <sys/wait.h>
-#include <stdbool.h>
 #include <time.h>
 #include <errno.h>
 
@@ -49,9 +48,10 @@
 #define ERR_MSG_REQUEST        "ERROR INVALID REQUEST\n"
 
 /** These are for debugging, uncomment to debug **/
-#define DEBUG
 #define DEBUG_SERVER
+//#define DEBUG_CLIENT
 #define DEBUG_PARSING
+#define DEBUG_LIST
 #define DEBUG_MORE	
 #define DEBUG_SEND
 #define DEBUG_RECV
@@ -60,6 +60,7 @@
 #define DEBUG_FILE
 #define DEBUG_POPULATE
 #define DEBUG_SYNC
+#define DEBUG_GETLINE
 #define DEBUG_QUERY
 
 char * tmp_dirname = "";
@@ -85,13 +86,12 @@ void remove_file(char * filename) {
 	if(n == 0) {
 	      
 #ifdef DEBUG_FILE
-		printf("[%s] deleted %s successfully\n", asker, filename);
+		printf("[%s] deleted [%s] successfully\n", asker, filename);
 		fflush( stdout );
 #endif
 
 	} else {
-		
-		fprintf(stderr, "[%s] unable to delete %s: %s\n", asker, filename, strerror(errno));
+		fprintf(stderr, "[%s] unable to delete [%s]: %s\n", asker, filename, strerror(errno));
 	}
 }
 
@@ -112,7 +112,7 @@ void file_exists(char * filename) {
 		
 	} else {
 		
-		fprintf(stderr, "[%s] %s does not exist: %s\n", asker, filename, strerror(errno));
+		fprintf(stderr, "[%s] File [%s] does not exist: %s\n", asker, filename, strerror(errno));
 		
 	}
 }
@@ -132,7 +132,7 @@ FILE * open_file(char * filename, char * mode) {
 	
 	if( file == NULL) {
 	      
-		fprintf(stderr, "[%s] fopen() failed - %s: %s\n", asker, filename, strerror(errno));
+		fprintf(stderr, "[%s] fopen() failed for [%s] : %s\n", asker, filename, strerror(errno));
 		
 		exit(EXIT_FAILURE);
 	}
@@ -147,8 +147,10 @@ FILE * open_file(char * filename, char * mode) {
  *	".", 
  *	"..",
  *	".4220_file.list.txt",
- *	".4220_file_list.server.txt", or
- *	the [a.out] file
+ *	".4220_file_list.server.txt",
+ *	the [a.out] file, 
+ *  .pdf files
+ *  .c files 
  * 
  * @param name, the file name to check
  * @return 1 if the file is ok, and 0 o.w
@@ -158,15 +160,15 @@ int is_valid_file(char const * name) {
 	
 	return strcmp(name, ".") * strcmp(name, "..") * strcmp(name, FILE_LIST) 
 	* strcmp(name, SERVER_FILE_LIST) * strcmp(name, outfile) *
-	strncmp(name + strlen(name) - 2,  ".c", 2) ;
+	strncmp(name + strlen(name) - 2,  ".c", 2) * strncmp(name + strlen(name) - 4,  ".pdf", 4);
 }
 
 
 /**
  * get_file_list scans the requested directory and populates an
  * array of character pointers with the names of those files.
- * It does not include ".", "..", or any of the .4220_file_list
- * files. 
+ * It does not include any of the files listed in the documentation
+ * of is_valid_file()
  * 
  * The list will be sorted in alphabetical order to facilitate
  * the file_sync. It will also be used to populate the .4220_file_list.
@@ -229,8 +231,9 @@ char ** get_file_list(char * dirname, size_t * num_files) {
 
 	
 	*num_files = size;
+	
 
-#ifdef DEBUG_POPULATE	
+#ifdef DEBUG_LIST	
 
 	 i = 0; 
 	 
@@ -247,47 +250,33 @@ char ** get_file_list(char * dirname, size_t * num_files) {
 	return file_list;
 }
 
-/**
- *  print_content_line is for debugging, for printing a line
- * from the .4220_file_list.txt file
- * 
- * @param hash the hash to print
- * @param filename the file the hash belongs to
-**/
-
-void print_content_line(unsigned char * hash, char * filename) {
-      
-      int i;
-
-      for(i = 0; i < MD5_DIGEST_LENGTH; i++) {
-            printf("%02x", hash[i]);
-            fflush (stdout);
-      }
-          
-      printf (" %s\n", filename);
-      fflush (stdout);
-}
 
 /**
- *  get_hash as string returns the hash as a string
- * in hex
+ * compare_hashes compares two hex strings for
+ * equality
  * 
  * @param hash1 the first hash to compare
  * @param hash2 the second hash to compare
-**/
-
-int compare_hashes(unsigned char * hash1, unsigned char * hash2) {
+ * @return 0 if they are equal, o.w a non-zero number
+ */
+int compare_hashes(char * hash1, char * hash2) {
       
       int isEqual = memcmp(hash1, hash2, MD5_DIGEST_LENGTH);
-      
+
+
+#ifdef DEBUG_SYNC
       if (isEqual == 0) {
             printf("They are equal!\n");
       } else {
             printf("They are not equal :( \n");
       }
+     fflush(stdout);
+#endif
+      
 
       return isEqual;
 }
+
 
 /**
  * get_MD5 returns the MD5 checksum of a file
@@ -319,6 +308,7 @@ unsigned char * get_MD5(char * filename) {
     for(i = 0; i < MD5_DIGEST_LENGTH; i++) 
     	printf("%02x", hash[i]);
     printf (" %s\n", filename);
+    fflush(stdout);
 #endif
     
     fclose (file);
@@ -327,12 +317,39 @@ unsigned char * get_MD5(char * filename) {
 	
 }
 
+
+/** put_line puts a line into the .4220_file_list.
+ * 
+ * The format of each line in your .4220_file_list.txt file should be the hash, 
+ * four spaces, then file name like so:
+ * 
+ * b468ef8dfcc96cc15de74496447d7b45 Assignment4.pdf
+ * d41d8cd98f00b204e9800998ecf8427e foo.txt 
+ * 
+ * @param file the file fd
+ * @param hash the hash string
+ * @param filename the filename
+ * @effect [HASH]    [Filename] is added to a file
+ */
 void put_line(FILE * file, unsigned char * hash, char * filename) {
      
      int i;
      
       for(i = 0; i < MD5_DIGEST_LENGTH; i++) {
-            fputc( hash[i], file);
+
+            char tmp[2];
+            tmp[0] = '\0';
+            tmp[1] = '\0';
+                  	
+            sprintf(tmp, "%x", hash[i]);
+    	
+            char c = tmp[0];
+            int k = 0;
+            while ( k < 2 && c != '\0' ) {
+                  fputc(c, file); k++; 
+                  c = tmp[k];
+            }
+            
       }
       
       fwrite("    ", 4, 1, file); 
@@ -343,16 +360,22 @@ void put_line(FILE * file, unsigned char * hash, char * filename) {
       fputc('\n', file);
 }
 
+/** 
+ * feed_files is called by populate_file_list() to iterate
+ * through an array of files and send them to put_line()
+ * one by one.
+ * 
+ * @param filenames the array of filenames
+ * @param numfiles
+ * @effect the file_list.txt file is generated
+*/
 void feed_files(char ** filenames, size_t numfiles) {
       
       int k = 0;
       
-      printf("Writing to the file...\n");
       fflush(stdout);
       
       FILE * file = open_file(FILE_LIST, "w");
-      
-      printf("[%s] numfiles to write %zu\n", asker, numfiles);
       
       while (k < numfiles) {
       
@@ -363,7 +386,6 @@ void feed_files(char ** filenames, size_t numfiles) {
             k++;
       }
 
-      
       fclose(file);
 }
 
@@ -373,12 +395,6 @@ void feed_files(char ** filenames, size_t numfiles) {
  * files with the correct md5 hashes. It will be .4220_file_list.txt will 
  * be populated over time as clients connect and upload fles. 
  * 
- * The format of each line in your .4220_file_list.txt file should be the hash, 
- * four spaces, then file name like so:
- * 
- * b468ef8dfcc96cc15de74496447d7b45 Assignment4.pdf
- * d41d8cd98f00b204e9800998ecf8427e foo.txt 
- * 
  * @effect populates the .4220_file_list in the cwd
  */
 void populate_file_list() {
@@ -386,11 +402,15 @@ void populate_file_list() {
 	size_t num_files;
 
 	char ** list = get_file_list(".", &num_files);
-	
-	printf("Populating file...\n");
-	fflush (stdout);
+
+#ifdef DEBUG_POPULATE	
+printf("Populating file...\n");
+fflush (stdout);
+#endif
 
 	feed_files(list, num_files);
+	
+	//
 	
 	free(list);
 	
@@ -465,25 +485,34 @@ time_t get_mtime(char * filename) {
  */
 int compare_mtimes(time_t t1, time_t t2) {
 	
+	int t; 
 // or difftime(t1,t2);
     if (t1 < t2) {
     	
-    	   /* t1 (client) is older */
-    	   
-          return -1;
+    	/* t1 (client) is older */ 
+    	
+    	t = -1;
           
     } else if (t1 > t2) {
-    	   /* t2 (server) is older */
+    	
+    	/* t2 (server) is older */
 
-          return 1;
+        t = 1;
           
     } else {
     	
-    	   /* t1 and t2 are the same age */
-          
-    }
+    	/* t1 and t2 are the same age */
         
-    return 0; /* should never get here since we always cmpr diff hashes */
+        t = 0;  /* should never get here since we always cmpr diff hashes */
+    }
+    
+    
+#ifdef DEBUG_QUERY
+	printf("[%s] mtime comparison returned %d", asker, t);
+	fflush( stdout );
+#endif
+        
+    return t; 
 }
 
 
@@ -632,26 +661,26 @@ char **split_at_delim(const char* str, const char* delim, size_t* numtokens) {
 			
 			tokens[tokens_used++] = strdup(token);
 
-            #ifdef DEBUG_PARSING
-                  printf("[%s] Line: (%.40s)\n", asker, tokens[tokens_used - 1]);
-                  fflush( stdout );
-            #endif
+#ifdef DEBUG_PARSING
+printf("[%s] Line: (%.40s)\n", asker, tokens[tokens_used - 1]);
+fflush( stdout );
+#endif
 			
 			if(strcmp(rest, "") != 0) {
 				
 				tokens[tokens_used++] = strdup(rest);
 				
-                  #ifdef DEBUG_PARSING
-                        printf("[%s] Line: (%.40s)\n", asker, 
-                        tokens[tokens_used - 1]);
-                        fflush( stdout );
-                  #endif
+#ifdef DEBUG_PARSING
+    printf("[%s] Line: (%.40s)\n", asker, 
+    tokens[tokens_used - 1]);
+    fflush( stdout );
+#endif
                   
 			}
 		}
 	}
 	
-#ifdef DEBUG_MORE
+#ifdef DEBUG_PARSING
       printf("[%s] Numtokens: %zu\n", asker, tokens_used);
       fflush( stdout );
 #endif
@@ -708,12 +737,12 @@ int recv_msg( int sock, char * buffer ) {
 	      
 		buffer[n] = '\0';
 		
-#ifdef DEBUG
+#ifdef DEBUG_RECV
 		printf("[%s] received %d bytes of data\n", asker, n);
 		fflush( stdout );
 #endif
 
-#ifdef DEBUG_MORE
+#ifdef DEBUG_RECV
 		printf("[%s] RCVD [%.40s]...\n", asker, buffer);
 		fflush( stdout );
 #endif
@@ -944,8 +973,8 @@ void send_file(int newsock, char * filename, long int file_length, char * buffer
  * @param mtime the last modified time in time_t
  * @effect ACK [mtime] is sent to the client
 */
-void respond_query( int sock, time_t mtime) 
-{
+void respond_query( int sock, time_t mtime) {
+	
 	char * buffer = (char *) malloc ((BUFFER_SIZE + 1) * sizeof(char));
 
 	sprintf( buffer, "ACK %s\n", ctime(&mtime));
@@ -971,8 +1000,7 @@ void respond_query( int sock, time_t mtime)
  * @param buffer
  * @effect PUT [filename] [length] [file contents] is sent to server
  */
-void send_put( int sock, char * filename, long int length, char * unused )
-{
+void send_put( int sock, char * filename, long int length, char * unused ) {
       char buffer[BUFFER_SIZE];
       
 	sprintf( buffer, "PUT %s %li\n", filename, length );
@@ -995,7 +1023,6 @@ void send_put( int sock, char * filename, long int length, char * unused )
  * @param filename
  * @param buffer
  * @effect GET [filename] is sent to the server
- * 
  */
 void send_get( int sock, char * filename, char * buffer ) {
 	
@@ -1005,6 +1032,7 @@ void send_get( int sock, char * filename, char * buffer ) {
 	
 	send_msg(sock, buffer, bytes);
 }
+
 
 /**
  * recv_status recvs the mtime and stat of a file
@@ -1045,10 +1073,9 @@ void recv_status( int sock, char * buffer, time_t * mtime ) {
  * @param sock
  * @param buffer
  * @return the number of bytes receieved
- * 
  */
-int recv_size( int sock, char * data )
-{
+int recv_size( int sock, char * data ) {
+	
       char buffer[BUFFER_SIZE];
       int length = 0;
       
@@ -1225,47 +1252,89 @@ void request_contents(int sock, char * unused) {
 
  }
  
- int get_line(FILE * fd, unsigned char * hash, char * filename) {
-    
-      char c;
-      unsigned char u;
-      int i = 0;
-      
-      int w;
-      
-      if ((w = fgetc(fd)) == EOF) { 
-      	printf("%d\n", w);
-      	return w;
-      }
-      	
-      hash[i] = (unsigned char) w;
-      printf("%02x ", hash[i]);
-      
-      for(i = 1; i < MD5_DIGEST_LENGTH; i++) {
-      	hash[i] = u;
-            u = fgetc(fd);
-            printf("%02x ", u);
-      }
-      
-      hash[MD5_DIGEST_LENGTH] = '\0';
-      
-      for(i = 0; i < 4; i++) {
-            c = fgetc(fd);
-            printf("%c", c);
-      }
-      
-      for(i = 0; i < 255; i++) {
-            if ((c = fgetc(fd)) == '\n') {
-                 printf("%c", c);
-                 break;   
-            }
-            filename[i] = c;
-            printf("%c", c);
-      }
 
-      filename[i] = '\0';
+int get_line(FILE * fd, char * hash, char * filename) {
+	
+	char c;
+    unsigned char u;
+    int i = 0, w;
       
-      return c;
+    /* Check for end of file */
+    
+	if ((w = fgetc(fd)) == EOF) {
+      	
+ #ifdef DEBUG_GETLINE
+ printf("No more lines to read.");
+ fflush( stdout );
+ #endif
+      	return w;
+		
+	}
+
+	/* If we made it here, there is/are still line(s) to read */
+	hash[i] = (char) w;
+
+#ifdef DEBUG_GETLINE
+printf("Reading: %c", hash[i]);
+fflush( stdout );
+#endif
+
+	/* get the hex string */
+	
+	while ((u = fgetc(fd)) != ' ') {
+		
+		hash[i] = u; 	
+		
+		i++;
+		
+#ifdef DEBUG_GETLINE
+printf("%c", u);
+fflush( stdout );
+#endif
+ 
+	}
+	
+	hash[i] = '\0';
+	
+	
+	/* skip spaces */
+	
+	for(i = 0; i < 3; i++) {
+		
+	    c = fgetc(fd);
+
+#ifdef DEBUG_GETLINE
+printf("%c", c);
+fflush( stdout );
+#endif
+
+	}
+	
+	/* get the filename */
+	
+	for(i = 0; i < 255; i++) {
+		
+	    if ((c = fgetc(fd)) == '\n') break;
+
+	    filename[i] = c;
+
+	    
+#ifdef DEBUG_GETLINE
+printf("%c", c);
+fflush( stdout );
+#endif
+
+	}
+	
+#ifdef DEBUG_GETLINE
+printf("\n");
+fflush( stdout );
+#endif
+	
+	
+	filename[i] = '\0';
+	
+	return c;
 }
 
 /** 
@@ -1283,61 +1352,52 @@ void request_contents(int sock, char * unused) {
  */
 void file_sync(int sock) {
       
-       char * buffer = (char * ) malloc((BUFFER_SIZE + 1) * sizeof(char));
+    char * buffer = (char * ) malloc((BUFFER_SIZE + 1) * sizeof(char));
 	
 	/* Define variables for client/server files */
 	
 	FILE * client_file = open_file(FILE_LIST, "r+");
 	FILE * server_file = open_file(SERVER_FILE_LIST, "r+");
 	
-	unsigned char * c_hash = (unsigned char *) malloc (MD5_DIGEST_LENGTH * sizeof(unsigned char));
-	unsigned char * s_hash = (unsigned char *) malloc (MD5_DIGEST_LENGTH * sizeof(unsigned char));
-	
-	char client_filename[FILENAME_LENGTH];
- 	char server_filename[FILENAME_LENGTH];
-
+	char * c_hex = (char * ) malloc((BUFFER_SIZE + 1) * sizeof(char));
+	char * s_hex = (char * ) malloc((BUFFER_SIZE + 1) * sizeof(char));
+	char * client_filename = (char * ) malloc((FILENAME_LENGTH + 1) * sizeof(char));
+ 	char * server_filename = (char * ) malloc((FILENAME_LENGTH + 1) * sizeof(char));
 
 	/* Get the first lines in each file */
 
-	char cli_n = get_line(client_file, c_hash, client_filename);
+	char cli_n = get_line(client_file, c_hex, client_filename);
 		
-	char ser_n = get_line(server_file, s_hash, server_filename);
+	char ser_n = get_line(server_file, s_hex, server_filename);
 		
 
 	/* Run a "merge-sort" algorithm to the server and client lists */
 
 	while(cli_n != EOF && ser_n != EOF) {
 		
-#ifdef DEBUG_SYNC
-	print_content_line(c_hash, client_filename);
-	print_content_line(s_hash, server_filename);
-
-#endif
-
-		
 		if(strcmp(client_filename, server_filename) < 0) {
 			
 			/* The file doesn't exit on the server, PUT and 
 			get the next line for the client */
-			
+
 			request_put(sock, buffer, client_filename);
 			
-			cli_n = get_line(client_file, c_hash, client_filename);
+			cli_n = get_line(client_file, c_hex, client_filename);
 			
 		} else if (strcmp(client_filename, server_filename) > 0) {
-			
+
 			/* The file doesn't exit on the client, GET and get the next line
 			for the server */
 			
 			request_get(sock, buffer, server_filename);
 
-			ser_n = get_line(server_file, s_hash, server_filename);	
+			ser_n = get_line(server_file, s_hex, server_filename);	
 			
 		} else { // else (client_filename == server_filename)
 		
 			/* Since both files exist, check the hashes */
 			
-			int d = compare_hashes(c_hash, s_hash);
+			int d = compare_hashes(c_hex, s_hex);
 
 			if (d != 0) { 
 				
@@ -1352,7 +1412,9 @@ void file_sync(int sock) {
 					request_get(sock, buffer, server_filename);
 
 				} else {
+					
 					/* client has newer */
+					
 					request_put(sock, buffer, client_filename);
 				}
 			}
@@ -1360,9 +1422,9 @@ void file_sync(int sock) {
 
 			/* Get the next lines in each file */
 			
-		cli_n = get_line(client_file, c_hash, client_filename);
+		cli_n = get_line(client_file, c_hex, client_filename);
 		
-		ser_n = get_line(server_file, s_hash, server_filename);
+		ser_n = get_line(server_file, s_hex, server_filename);
 			
 		}
 	}
@@ -1373,13 +1435,9 @@ void file_sync(int sock) {
 	
   while(cli_n != EOF) {
 
-#ifdef DEBUG_SYNC
-	print_content_line(c_hash, client_filename);
-#endif
-
 	request_put(sock, buffer, client_filename);
 	
-	cli_n = get_line(client_file, c_hash, client_filename);
+	cli_n = get_line(client_file, c_hex, client_filename);
   	
   }
   
@@ -1388,14 +1446,10 @@ void file_sync(int sock) {
      get them from the server */
      
   while(ser_n != EOF) {
-  	
-#ifdef DEBUG_SYNC 
-	print_content_line(s_hash, server_filename);
-#endif
 
   	request_get(sock, buffer, server_filename);  	
   	
-	ser_n = get_line(server_file, s_hash, server_filename);
+	ser_n = get_line(server_file, s_hex, server_filename);
 
   }
   
@@ -1412,6 +1466,12 @@ void file_sync(int sock) {
   
   fclose(client_file);
   fclose(server_file);
+  
+  free(c_hex);
+  free(s_hex);
+  free(client_filename);
+  free(server_filename);
+  free(buffer);
 	
 }
 
@@ -1419,7 +1479,10 @@ void file_sync(int sock) {
 /****************** Run Server/Client  ********************/
 
 /**
- * run_client runs the current client
+ * run_client runs the job of the client, which is to:
+ * - populate it's file_list
+ * - request contents from the server
+ * - sync with the server
  * 
  * @param newsock
  * @param lines
@@ -1427,18 +1490,11 @@ void file_sync(int sock) {
  */
 void run_client(int sock) {
       
-   //   char buffer[ BUFFER_SIZE ];
-      
-      char * buffer = (char * ) malloc((BUFFER_SIZE + 1) * sizeof(char));
+    char * buffer = (char * ) malloc((BUFFER_SIZE + 1) * sizeof(char));
 	
-	/* populate .4220_file_list.txt with hashes */
-
 	populate_file_list();
 	
 	request_contents(sock, buffer);
-	
-//	request_put(sock, buffer, "mouse.txt");
-//	request_get(sock, buffer, "mouse.txt");
 	
 	file_sync(sock);
 
@@ -1485,7 +1541,7 @@ void start_client(int* sock, unsigned short port) {
 		exit( EXIT_FAILURE );
 	}
 
-#ifdef DEBUG_SERVER
+#ifdef DEBUG_CLIENT
 	printf( "Server address is %s connected to the server \n", inet_ntoa( server.sin_addr ) );
 	fflush( stdout );
 #endif
@@ -1494,13 +1550,15 @@ void start_client(int* sock, unsigned short port) {
 
 
 /**
- * do_command carries out the client's request
+ * do_command carries out the client's request.
  * 
- * @param newsock
- * @param lines
- * @param numparts
+ * A request is valid if it begins with PUT, GET,
+ * QUERY, or, CONTENTS
+ * 
+ * @param newsock the client sock
+ * @param lines the command line [and possibly some data attached]
  */
-void do_command(int newsock, char ** lines, int numparts) {
+void do_command(int newsock, char ** lines) {
 
 	char * filename = (char *) malloc ((FILENAME_LENGTH + 1) * sizeof(char));
 	char * buffer = (char *) malloc ((BUFFER_SIZE + 1) * sizeof(char));
@@ -1514,6 +1572,8 @@ void do_command(int newsock, char ** lines, int numparts) {
 			send_err_msg(newsock, ERR_MSG_PARAMS);
 			return;
 		}
+		
+		/* Recv the file  */
 		
 		length = atoi(tmp_length);
 		
@@ -1530,6 +1590,8 @@ void do_command(int newsock, char ** lines, int numparts) {
 			return;
 		}
 		
+		/* Send the requested file: ACK [length]\n[data] */
+		
 		length = get_file_length(filename);
 		
 		sprintf(buffer, "ACK %li\n", length);
@@ -1545,6 +1607,8 @@ void do_command(int newsock, char ** lines, int numparts) {
 			return;
 		}
 		
+		 /* Send the last mtime: ACK [mtime] */
+
 		 time_t mtime;
 		 
 		 mtime = get_mtime(filename);
@@ -1558,12 +1622,16 @@ void do_command(int newsock, char ** lines, int numparts) {
 			return;
 		}
 		
+		/* Send the file_list: ACK [length]\n[data] */
+		
 		length = get_file_length(FILE_LIST);
 		
 		sprintf(buffer, "ACK %li\n", length);
 
 		send_file(newsock, FILE_LIST, length, buffer);
-		
+
+		/* recv an ACK if the client rcved it.  */
+
 		recv_msg(newsock, buffer); /* ACK */
 
 
@@ -1620,29 +1688,29 @@ void run_server(int newsock, const struct sockaddr_in* client) {
 
 			/* Carry out instruction **/
 			
-			do_command(newsock, lines, numlines);	
-
-					
+			do_command(newsock, lines);	
 
 			/* free space */
 			
-			free(lines[0]);
+			int i;
+			for (i = 0; i < numlines; i++) 
+			  free(lines[i]);
+			  
 			if (lines != NULL)
 				free(lines);
 
 		}
 
-#ifdef DEBUG		
-printf("[%s] completed command\n", asker);
+#ifdef DEBUG_SERVER		
+printf("[%s] command completed\n", asker);
 fflush( stdout );
 #endif
 
-		
 
 	} while (n > 0);
 
 	close(newsock);
-#ifdef DEBUG
+#ifdef DEBUG_SERVER
 	printf("[%s] Client disconnected\n", asker);
 	fflush( stdout );
 #endif
@@ -1687,8 +1755,10 @@ int start_server(unsigned short port) {
 
 	listen(sd, 5); /* 5 is the max number of waiting clients */
 
+#ifdef DEBUG_SERVER
 	printf("Started server; listening on port: %d\n", port);
 	fflush( stdout );
+#endif
 
 	return sd;
 }
@@ -1744,7 +1814,7 @@ int main( int argc, char **argv){
     		
     		int newsock = accept( sd, (struct sockaddr *)&client,
     				(socklen_t*)&fromlen );
-#ifdef DEBUG   
+#ifdef DEBUG_SERVER
     		printf("Received incoming connection from: %s\n", inet_ntoa( (struct in_addr)client.sin_addr));
     		fflush( stdout );
 #endif
@@ -1771,7 +1841,7 @@ int main( int argc, char **argv){
     			
     			close( newsock );
     		
-    			populate_file_list();
+    			populate_file_list(); /* Repopulates the .4220.file_list */
     		}
     	}
     

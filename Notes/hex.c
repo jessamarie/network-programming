@@ -83,42 +83,28 @@ void print_line(unsigned char * hash, char * filename) {
       fflush (stdout);
 }
 
-void print_as_one(unsigned char * hash, char * filename) {
-      
-      int i;
-      
-      char buffer[MD5_DIGEST_LENGTH + strlen(filename) + 4];
-
-      for(i = 0; i < MD5_DIGEST_LENGTH; i++) {
-            sprintf(buffer + i, "%02x", hash[i]);
-      }
-          
-      sprintf(buffer + i, "    %s", filename);
-      printf("%s\n", buffer);
-}
-
 void put_line(FILE * file, unsigned char * hash, char * filename) {
       
-      printf("writing %s\n", filename);
+      printf("Writing %s: ", filename);
      
      int i;
      
       for(i = 0; i < MD5_DIGEST_LENGTH; i++) {
             
             char tmp[2];
-            tmp[0] = '\n'
-            tmp[1] = '\n';
+            tmp[0] = '\0';
+            tmp[1] = '\0';
             
             sprintf(tmp, "%x", hash[i]);
             
-            tmp[2] = '\0';
-            
             char c = tmp[0];
             int k = 0;
-            while ( < len) {
-
-                  fputc(tmp[j], file);
+            while ( k < 2 && c != '\0' ) {
+                  printf("%c", c);
+                  fputc(c, file); k++; 
+                  c = tmp[k];
             }
+            
       }
       
       fwrite("    ", 4, 1, file); 
@@ -127,6 +113,7 @@ void put_line(FILE * file, unsigned char * hash, char * filename) {
             fputc(filename[i], file);
             
       fputc('\n', file);
+      printf("\n");
 }
 
 void make_file(char ** filenames) {
@@ -152,15 +139,25 @@ void make_file(char ** filenames) {
       fclose(file);
 }
 
-void get_line(FILE * fd, unsigned char * hash, char * filename) {
+void get_line(FILE * fd, char * hash, char * filename) {
       char c;
       unsigned char u;
-      int i; 
+      int i;
+      
+      printf("Reading %s: ", filename);
+
       
       for(i = 0; i < MD5_DIGEST_LENGTH; i++) {
-           u = fgetc(fd);
-           printf("%u", u);
+            
+            u = fgetc(fd);
+            
+            hash[i] = u;
+
+           printf("%c", u);
+
       }
+      
+      hash[i] = '\0';
       
       for(i = 0; i < 4; i++) {
             c = fgetc(fd);
@@ -175,6 +172,14 @@ void get_line(FILE * fd, unsigned char * hash, char * filename) {
                 
             printf("%c", c);
       }
+      
+      int isEqual = memcmp(hash,hash, MD5_DIGEST_LENGTH);
+      
+      if (isEqual == 0) {
+            printf("They are equal!\n");
+      } else {
+            printf("They are not equal :( \n");
+      }
 }
 
 void read_file() {
@@ -183,7 +188,7 @@ void read_file() {
       
       FILE * fd = fopen("newfile.txt", "r+");
 
-      unsigned char hash[MD5_DIGEST_LENGTH];
+      char hash[MD5_DIGEST_LENGTH];
       char filen[255];
       
       get_line(fd, hash, filen);
