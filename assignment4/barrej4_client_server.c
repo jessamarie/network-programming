@@ -1,7 +1,7 @@
 /* Author: Jessica Marie Barre
    Name: File Sync Utility
    Purpose: A filesync utility that is similar to rsync
-   Due: Wednesday, May 3rd
+   Due: Wednesday, May 3rd (May 6th w/ late days)
 */
 
 #include <sys/stat.h>
@@ -38,24 +38,9 @@
 #define CMD_QUERY			 "QUERY"
 
 #define ERR_MSG_PARAMS  	 "ERROR INVALID PARAMETERS\n"
-#define ERR_MSG_BYTES          "ERROR INVALID BYTE RANGE\n"
+#define ERR_MSG_BYTES        "ERROR INVALID BYTE RANGE\n"
 #define ERR_MSG_NOFILE		 "ERROR NO SUCH FILE\n"
-#define ERR_MSG_REQUEST        "ERROR INVALID REQUEST\n"
-
-/** These are for debugging, uncomment to debug **/
-//#define DEBUG_SERVER
-//#define DEBUG_CLIENT
-#define DEBUG_PARSING
-#define DEBUG_LIST
-//#define DEBUG_SEND
-//#define DEBUG_RECV
-//#define DEBUG_READ
-//#define DEBUG_WRITE
-//#define DEBUG_FILE
-//#define DEBUG_POPULATE
-//#define DEBUG_SYNC
-#define DEBUG_GETLINE
-#define DEBUG_QUERY
+#define ERR_MSG_REQUEST      "ERROR INVALID REQUEST\n"
 
 char * tmp_dirname = "";
 char * asker = "";
@@ -78,12 +63,7 @@ void remove_file(char * filename) {
 	int n = remove(filename);
 
 	if(n == 0) {
-
-#ifdef DEBUG_FILE
-		printf("[%s] deleted [%s] successfully\n", asker, filename);
-		fflush( stdout );
-#endif
-
+		
 	} else {
 		fprintf(stderr, "[%s] unable to delete [%s]: %s\n", asker, filename, strerror(errno));
 	}
@@ -97,17 +77,10 @@ void remove_file(char * filename) {
 */
 void file_exists(char * filename) {
 
-	if ( access( filename, F_OK ) != -1 ) {
-
-#ifdef DEBUG_FILE
-		printf("[%s] %s exists\n", asker, filename);
-		fflush( stdout );
-#endif
-
+	if ( access( filename, F_OK ) != -1 ) {	
+		
 	} else {
-
 		fprintf(stderr, "[%s] File [%s] does not exist: %s\n", asker, filename, strerror(errno));
-
 	}
 }
 
@@ -152,9 +125,13 @@ FILE * open_file(char * filename, char * mode) {
 */
 int is_valid_file(char const * name) {
 
-	return strcmp(name, ".") * strcmp(name, "..") * strcmp(name, FILE_LIST)
-	* strcmp(name, SERVER_FILE_LIST) * strcmp(name, outfile) *
-	strncmp(name + strlen(name) - 2,  ".c", 2) * strncmp(name + strlen(name) - 4,  ".pdf", 4);
+	return strcmp(name, ".") 
+	* strcmp(name, "..") * strcmp(name, FILE_LIST)
+	* strcmp(name, SERVER_FILE_LIST) 
+	* strcmp(name, outfile) 
+	* strncmp(name + strlen(name) - 2,  ".c", 2)
+	* strncmp(name + strlen(name) - 4,  ".pdf", 4); // pdf's cause server to hang
+	
 }
 
 
@@ -226,21 +203,6 @@ char ** get_file_list(char * dirname, size_t * num_files) {
 
 	*num_files = size;
 
-
-#ifdef DEBUG_LIST
-
-	 i = 0;
-
-	 while (i < size) {
-
-		printf("[%s] File %d: %s\n", asker, i + 1, file_list[i]);
-	    	fflush( stdout );
-
-	    	i++;
-	 }
-
-#endif
-
 	return file_list;
 }
 
@@ -257,17 +219,6 @@ int compare_hashes(char * hash1, char * hash2) {
 
       int isEqual = memcmp(hash1, hash2, MD5_DIGEST_LENGTH);
 
-
-#ifdef DEBUG_SYNC
-      if (isEqual == 0) {
-            printf("They are equal!\n");
-      } else {
-            printf("They are not equal :( \n");
-      }
-     fflush(stdout);
-#endif
-
-
       return isEqual;
 }
 
@@ -280,7 +231,7 @@ int compare_hashes(char * hash1, char * hash2) {
  * @param string the empty string that gets populated
  * @effect convert hex to string representation
  */
-void convert_hex_to_string(unsigned char * hex, char * string) {
+void print_hex_as_string(unsigned char * hex) {
 
   int i;
 
@@ -296,13 +247,13 @@ void convert_hex_to_string(unsigned char * hex, char * string) {
 		int k = 0;
 
 		while ( k < 2 && c != '\0' ) {
-		      k++;
-		      c = tmp[k];
+			printf("%c", c);  
+		    k++;
+		    c = tmp[k];
 		}
-
-		sprintf(string + strlen(string), "%s", tmp);
     }
 }
+
 
 /**
  * get_MD5 returns the MD5 checksum of a file
@@ -328,14 +279,6 @@ unsigned char * get_MD5(char * filename) {
         MD5_Update (&context, data, bytes);
 
     MD5_Final (hash,&context);
-
-#ifdef DEBUG_POPULATE
-    int i;
-    for(i = 0; i < MD5_DIGEST_LENGTH; i++)
-    	printf("%02x", hash[i]);
-    printf (" %s\n", filename);
-    fflush(stdout);
-#endif
 
     fclose (file);
 
@@ -429,11 +372,6 @@ void populate_file_list() {
 
 	char ** list = get_file_list(".", &num_files);
 
-#ifdef DEBUG_POPULATE
-printf("Populating file...\n");
-fflush (stdout);
-#endif
-
 	feed_files(list, num_files);
 
 	int i;
@@ -443,11 +381,6 @@ fflush (stdout);
 
 	free(list);
 
-
-#ifdef DEBUG_POPULATE
-      printf("[%s] populated .4220_file_list...\n", asker);
-      fflush( stdout );
-#endif
 }
 
 
@@ -492,12 +425,7 @@ time_t get_mtime(char * filename) {
 
 	if (stat(filename, &attr) == 0) {
 
-#ifdef DEBUG_QUERY
-	printf("[%s] %s last modified time was %s", asker, filename, ctime(&attr.st_mtime));
-	fflush( stdout );
-#endif
-
-	return attr.st_mtime;
+		return attr.st_mtime;
     }
 
     return 0;
@@ -513,24 +441,8 @@ time_t get_mtime(char * filename) {
  *		and 0 if they are both the same age
  */
 int compare_mtimes(time_t t1, time_t t2) {
-	
-#ifdef DEBUG_QUERY
-	
-	char buff1[20], buff2[20];
-
-	strftime(buff1, 20, "%Y-%m-%d %H:%M:%S", localtime(&t1));
-	strftime(buff2, 20, "%Y-%m-%d %H:%M:%S", localtime(&t2));
-
-	printf("[%s] %s - %s\n", asker, buff1, buff2);
-	fflush( stdout );
-#endif
 
 	int t = difftime(t1,t2);
-
-#ifdef DEBUG_QUERY
-	printf("[%s] mtime comparison returned %d\n", asker, t);
-	fflush( stdout );
-#endif
 
     return t;
 }
@@ -681,29 +593,13 @@ char **split_at_delim(const char* str, const char* delim, size_t* numtokens) {
 
 			tokens[tokens_used++] = strdup(token);
 
-#ifdef DEBUG_PARSING
-printf("[%s] Line: (%.40s)\n", asker, tokens[tokens_used - 1]);
-fflush( stdout );
-#endif
-
 			if(strcmp(rest, "") != 0) {
 
 				tokens[tokens_used++] = strdup(rest);
 
-#ifdef DEBUG_PARSING
-    printf("[%s] Line: (%.40s)\n", asker,
-    tokens[tokens_used - 1]);
-    fflush( stdout );
-#endif
-
 			}
 		}
 	}
-
-#ifdef DEBUG_PARSING
-      printf("[%s] Numtokens: %zu\n", asker, tokens_used);
-      fflush( stdout );
-#endif
 
 	/* Reallocate based on the # of tokens */
 
@@ -748,25 +644,10 @@ int recv_msg( int sock, char * buffer ) {
 
 	} else if ( n == 0 ) {
 
-      #ifdef DEBUG_RECV
-      		printf( "[%s] disconnected: Rcvd 0 from recv()\n", asker);
-      		fflush( stdout );
-      #endif
-
 	} else {
 
 		buffer[n] = '\0';
-
-#ifdef DEBUG_RECV
-		printf("[%s] received %d bytes of data\n", asker, n);
-		fflush( stdout );
-#endif
-
-#ifdef DEBUG_RECV
-		printf("[%s] RCVD [%.40s]...\n", asker, buffer);
-		fflush( stdout );
-#endif
-
+		
 	}
 
 	return n;
@@ -795,16 +676,6 @@ int send_msg( int sock, char * buffer, int bytes ) {
 		exit( EXIT_FAILURE );
 
 	} else {
-
-#ifdef DEBUG_SEND
-      	printf("[%s] Sent %d of %d bytes of data\n", asker, n, bytes);
-	      fflush( stdout );
-#endif
-
-#ifdef DEBUG_SEND
-		printf("[%s] SENT [%.40s]...\n", asker, buffer);
-		fflush( stdout );
-#endif
 
 	}
 
@@ -836,11 +707,11 @@ void send_err_msg( int sock, char * err ) {
  * @param length the length of the data to recv
  * @effect a file is updated/create in the cwd
  */
- void recv_file(int sock, char * data, char * filename, int length) {
+ void recv_file(int sock, char * data, char * filename, long int length) {
 
 	/* store any data after the '\n' character currently
 	 * in the buffer */
-
+	 
 	FILE * file = open_file( filename , "wb");
 
 	/* If the length is less than 1 then there is nothing to store
@@ -848,7 +719,7 @@ void send_err_msg( int sock, char * err ) {
 
 	if (length < 1) {
 
-	      fclose(file);
+	    fclose(file);
 
 		send_msg(sock, "ACK\n", 4);
 
@@ -857,45 +728,38 @@ void send_err_msg( int sock, char * err ) {
 
 	write_file(data, strlen(data), file);
 
-#ifdef DEBUG_WRITE
-	printf("[%s] initially wrote (%.40s)...\n", asker, data);
-	fflush( stdout );
-#endif
-
 	/* while bytes rcvd/stored < expected length */
 
 	int bytes_written = strlen(data);
 
 	while (bytes_written < length) {
 
-	    	char buffer[BUFFER_SIZE];
+	    char buffer[BUFFER_SIZE];
 
 		/* read more bytes */
 
 		int n = recv_msg(sock, buffer);
-
+	
 		if (n > 0) {
 
 			/* write more bytes */
-
+			
 			write_file(buffer, n, file);
 
 			bytes_written = bytes_written + n;
-
+			
 		} else {
 			break; /* don't get stuck if recv 0 */
 		}
 
 	} /* done */
-
-#ifdef DEBUG_WRITE
-	printf("[%s] finally wrote %d bytes of %d\n", asker, bytes_written, length);
-	fflush( stdout );
-#endif
+	
 
 	if(bytes_written != length) {
 
 		fclose(file);
+		
+		remove_file(filename); //don't save unsuccessful downloads
 
 		send_err_msg(sock, ERR_MSG_REQUEST);
 
@@ -904,13 +768,6 @@ void send_err_msg( int sock, char * err ) {
 
 
 	fclose(file);
-
-#ifdef DEBUG_WRITE
-
-	printf( "[%s] Stored file \"%s\" (%d bytes)\n", asker, filename, bytes_written);
-	fflush( stdout );
-
-#endif
 
 	send_msg(sock, "ACK\n", 4);
 
@@ -933,6 +790,7 @@ void send_file(int newsock, char * filename, long int file_length, char * buffer
 	FILE * fd = open_file(filename, "rb");
 
 	long int length = file_length;
+
 	int buff_len = strlen( buffer );
 	int bytes_read, bytes_sent;
 	int bytes = buff_len + length;
@@ -956,8 +814,10 @@ void send_file(int newsock, char * filename, long int file_length, char * buffer
 		bytes_sent = send_msg(newsock, buffer, buff_len);
 
 		while ( length > 0 ) {
+			
+			long int bytes_to_send = ( length < BUFFER_SIZE ? length : BUFFER_SIZE);
 
-			bytes_read = fread(buffer, sizeof(char), ( length < BUFFER_SIZE ? length : BUFFER_SIZE) , fd);
+			bytes_read = fread(buffer, sizeof(char), bytes_to_send , fd);
 
 			if ( bytes_read == -1 )
 			{
@@ -968,17 +828,11 @@ void send_file(int newsock, char * filename, long int file_length, char * buffer
 			length -= bytes_read;
 
 			bytes_sent += send_msg(newsock, buffer, bytes_read);
+			
 		}
 
 		fclose( fd );
 	}
-
-
-#ifdef DEBUG_READ
-	printf("[%s] Finally sent %d out of %li bytes of \"%s\"\n",
-	asker, bytes_sent - buff_len, file_length, filename);
-	fflush(stdout);
-#endif
 
 }
 
@@ -998,11 +852,10 @@ void respond_query( int sock, time_t mtime) {
 	char * buffer = (char *) malloc ((BUFFER_SIZE + 1) * sizeof(char));
 
 	char time[20];
+	
 	strftime(time, 20, "%Y-%m-%d %H:%M:%S", localtime(&mtime));
-	printf("[server] sending %s\n", time);
-	//sprintf( buffer, "ACK %s\n", ctime(&mtime));
+	
     sprintf(buffer, "ACK %s\n", time);
-
 
 	send_msg(sock, buffer, strlen(buffer));
 
@@ -1026,7 +879,8 @@ void respond_query( int sock, time_t mtime) {
  * @effect PUT [filename] [length] [file contents] is sent to server
  */
 void send_put( int sock, char * filename, long int length, char * unused ) {
-      char buffer[BUFFER_SIZE];
+    
+    char buffer[BUFFER_SIZE];
 
 	sprintf( buffer, "PUT %s %li\n", filename, length );
 
@@ -1102,10 +956,10 @@ void recv_status( int sock, char * buffer, time_t * mtime ) {
  * @param buffer
  * @return the number of bytes receieved
  */
-int recv_size( int sock, char * data ) {
+long int recv_size( int sock, char * data ) {
 
       char buffer[BUFFER_SIZE];
-      int length = 0;
+      long int length = 0;
 
       int n = recv_msg(sock, buffer);
 
@@ -1120,8 +974,8 @@ int recv_size( int sock, char * data ) {
 
 		sscanf(buffer, "ACK %s", tmp);
 
-		length = atoi(tmp);
-
+		int tmp_length = atoi(tmp);
+		length = tmp_length;
 
 		/* if length < 0 there is no data to receive */
 
@@ -1197,7 +1051,7 @@ void request_contents(int sock, char * unused) {
 
 	send_contents(sock, buffer);
 
-	int length = recv_size(sock, buffer);
+	long int length = recv_size(sock, buffer);
 
 	recv_file(sock, buffer, SERVER_FILE_LIST, length);
 
@@ -1221,7 +1075,7 @@ void request_contents(int sock, char * unused) {
 
 	send_get(sock, filename, buffer);
 
-	int length = recv_size(sock, buffer);
+	long int length = recv_size(sock, buffer);
 
 	recv_file(sock, buffer, filename, length);
 
@@ -1291,21 +1145,12 @@ int get_line(FILE * fd, char * hash, char * filename) {
 
 	if ((w = fgetc(fd)) == EOF) {
 
- #ifdef DEBUG_GETLINE
- printf("[%s] No more lines to read.\n", asker);
- fflush( stdout );
- #endif
       	return w;
 
 	}
 
 	/* If we made it here, there is/are still line(s) to read */
 	hash[i] = (char) w;
-
-#ifdef DEBUG_GETLINE
-printf("Reading: %c", hash[i]);
-fflush( stdout );
-#endif
 
 	/* get the hex string */
 
@@ -1314,11 +1159,6 @@ fflush( stdout );
 		hash[i] = u;
 
 		i++;
-
-#ifdef DEBUG_GETLINE
-printf("%c", u);
-fflush( stdout );
-#endif
 
 	}
 
@@ -1331,11 +1171,6 @@ fflush( stdout );
 
 	    c = fgetc(fd);
 
-#ifdef DEBUG_GETLINE
-printf("%c", c);
-fflush( stdout );
-#endif
-
 	}
 
 	/* get the filename */
@@ -1346,19 +1181,7 @@ fflush( stdout );
 
 	    filename[i] = c;
 
-
-#ifdef DEBUG_GETLINE
-printf("%c", c);
-fflush( stdout );
-#endif
-
 	}
-
-#ifdef DEBUG_GETLINE
-printf("\n");
-fflush( stdout );
-#endif
-
 
 	filename[i] = '\0';
 
@@ -1421,8 +1244,14 @@ void file_sync(int sock) {
 
 			request_get(sock, buffer, server_filename);
 			
-			printf("[%s] Downloading %s: %s\n", asker, server_filename, s_hex);
+    		printf("[%s] Downloading %s: ", asker, server_filename);
+		    
+		    unsigned char * hex = get_MD5(server_filename);
 
+    		print_hex_as_string(hex);
+    	  	printf("\n");
+    		fflush(stdout);
+			
 			ser_n = get_line(server_file, s_hex, server_filename);
 
 		} else { // else (client_filename == server_filename)
@@ -1445,8 +1274,13 @@ void file_sync(int sock) {
 
 					request_get(sock, buffer, server_filename);
 					
-					printf("[%s] Downloading %s: %s\n", asker, server_filename, s_hex);
-
+            		printf("[%s] Downloading %s: ", asker, server_filename);
+            
+        		    unsigned char * hex = get_MD5(server_filename);
+        
+            		print_hex_as_string(hex);
+            	  	printf("\n");
+            		fflush(stdout);
 
 				} else {
 
@@ -1488,16 +1322,17 @@ void file_sync(int sock) {
 
   	request_get(sock, buffer, server_filename);
   
-  	printf("[%s] Downloading %s: %s\n", asker, server_filename, s_hex);
+	printf("[%s] Downloading %s: ", asker, server_filename);
 
+    unsigned char * hex = get_MD5(server_filename);
+
+	print_hex_as_string(hex);
+  	printf("\n");
+	fflush(stdout);
+	
 	ser_n = get_line(server_file, s_hex, server_filename);
 
   }
-
-#ifdef DEBUG_SYNC
-	printf("[CLIENT] Sync finished....\n");
-	fflush( stdout );
-#endif
 
   /* Repopulate the client-side file */
 
@@ -1582,11 +1417,6 @@ void start_client(int* sock, unsigned short port) {
 		exit( EXIT_FAILURE );
 	}
 
-#ifdef DEBUG_CLIENT
-	printf( "Server address is %s connected to the server \n", inet_ntoa( server.sin_addr ) );
-	fflush( stdout );
-#endif
-
 }
 
 
@@ -1599,7 +1429,7 @@ void start_client(int* sock, unsigned short port) {
  * @param newsock the client sock
  * @param lines the command line [and possibly some data attached]
  */
-void do_command(int newsock, char ** lines) {
+void do_command(int newsock, char ** lines, size_t numlines) {
 
 	char * filename = (char *) malloc ((FILENAME_LENGTH + 1) * sizeof(char));
 	char * buffer = (char *) malloc ((BUFFER_SIZE + 1) * sizeof(char));
@@ -1620,26 +1450,25 @@ void do_command(int newsock, char ** lines) {
 		/* Recv the file  */
 
 		length = atoi(tmp_length);
+		
 
-		if (length > 0) {
-			recv_file(newsock, lines[1], filename, length);
-		} else {
+		if (length == 0 || numlines < 2) {
+			
+			/* We are either recving an empty file OR
+				we didn't recieve any content yet */
+				
 			recv_file(newsock, "", filename, length);
+			
+		} else {
+			
+			recv_file(newsock, lines[1], filename, length);
 		}
 
 		unsigned char * hex = get_MD5(filename);
-		convert_hex_to_string(hex, buffer);
-
-
-	  	
-		printf("[%s] Downloaded %s: ", asker, filename);
 		
-		// TODO: FIX BUFFER, AFTER RETURN, IT IS BAD - mby return from convert?
-		
-		int i;
-		for(i=0; i < strlen(buffer); i++)
-	    	printf("%c", buffer[i]);
-	
+		printf("[%s] Downloading %s: ", asker, filename);
+
+		print_hex_as_string(hex);
 	  	printf("\n");
 		fflush(stdout);
 
@@ -1742,14 +1571,9 @@ void run_server(int newsock, const struct sockaddr_in* client) {
 
 			lines = split_at_delim(buffer, "\n", &numlines);
 
-#ifdef DEBUG_SERVER
-			printf("[%s] Command Received: \"%s\"\n", asker, lines[0]);
-			fflush( stdout );
-#endif
-
 			/* Carry out instruction **/
-
-			do_command(newsock, lines);
+			
+			do_command(newsock, lines, numlines);
 
 			/* free space */
 
@@ -1766,10 +1590,7 @@ void run_server(int newsock, const struct sockaddr_in* client) {
 	} while (n > 0);
 
 	close(newsock);
-#ifdef DEBUG_SERVER
-	printf("[%s] Client disconnected\n", asker);
-	fflush( stdout );
-#endif
+	
 	exit(EXIT_SUCCESS); /* client terminates here! */
 }
 
@@ -1810,11 +1631,6 @@ int start_server(unsigned short port) {
 	}
 
 	listen(sd, 5); /* 5 is the max number of waiting clients */
-
-#ifdef DEBUG_SERVER
-	printf("Started server; listening on port: %d\n", port);
-	fflush( stdout );
-#endif
 
 	return sd;
 }
@@ -1870,10 +1686,6 @@ int main( int argc, char **argv){
 
     		int newsock = accept( sd, (struct sockaddr *)&client,
     				(socklen_t*)&fromlen );
-#ifdef DEBUG_SERVER
-    		printf("Received incoming connection from: %s\n", inet_ntoa( (struct in_addr)client.sin_addr));
-    		fflush( stdout );
-#endif
 
     		/* handle new socket in a client process,
     	       allowing the parent process to immediately go
