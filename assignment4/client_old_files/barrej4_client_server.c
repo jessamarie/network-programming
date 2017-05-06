@@ -5,11 +5,6 @@
 */
 
 #include <sys/stat.h>
-//#include <sys/types.h>
-//#include <fcntl.h>
-//#include <sys/socket.h>
-//#include <netinet/in.h>
-//#include <assert.h>
 #include <string.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
@@ -48,18 +43,17 @@
 #define ERR_MSG_REQUEST        "ERROR INVALID REQUEST\n"
 
 /** These are for debugging, uncomment to debug **/
-#define DEBUG_SERVER
+//#define DEBUG_SERVER
 //#define DEBUG_CLIENT
 #define DEBUG_PARSING
 #define DEBUG_LIST
-#define DEBUG_MORE
-#define DEBUG_SEND
-#define DEBUG_RECV
-#define DEBUG_READ
-#define DEBUG_WRITE
-#define DEBUG_FILE
-#define DEBUG_POPULATE
-#define DEBUG_SYNC
+//#define DEBUG_SEND
+//#define DEBUG_RECV
+//#define DEBUG_READ
+//#define DEBUG_WRITE
+//#define DEBUG_FILE
+//#define DEBUG_POPULATE
+//#define DEBUG_SYNC
 #define DEBUG_GETLINE
 #define DEBUG_QUERY
 
@@ -297,7 +291,7 @@ void convert_hex_to_string(unsigned char * hex, char * string) {
 		tmp[1] = '\0';
 
 		sprintf(tmp, "%x", hex[i]);
-
+		
 		char c = tmp[0];
 		int k = 0;
 
@@ -519,31 +513,22 @@ time_t get_mtime(char * filename) {
  *		and 0 if they are both the same age
  */
 int compare_mtimes(time_t t1, time_t t2) {
+	
+#ifdef DEBUG_QUERY
+	
+	char buff1[20], buff2[20];
 
-	int t;
-// or difftime(t1,t2);
-    if (t1 < t2) {
+	strftime(buff1, 20, "%Y-%m-%d %H:%M:%S", localtime(&t1));
+	strftime(buff2, 20, "%Y-%m-%d %H:%M:%S", localtime(&t2));
 
-    	/* t1 (client) is older */
+	printf("[%s] %s - %s\n", asker, buff1, buff2);
+	fflush( stdout );
+#endif
 
-    	t = -1;
-
-    } else if (t1 > t2) {
-
-    	/* t2 (server) is older */
-
-        t = 1;
-
-    } else {
-
-    	/* t1 and t2 are the same age */
-
-        t = 0;  /* should never get here since we always cmpr diff hashes */
-    }
-
+	int t = difftime(t1,t2);
 
 #ifdef DEBUG_QUERY
-	printf("[%s] mtime comparison returned %d", asker, t);
+	printf("[%s] mtime comparison returned %d\n", asker, t);
 	fflush( stdout );
 #endif
 
@@ -1012,7 +997,12 @@ void respond_query( int sock, time_t mtime) {
 
 	char * buffer = (char *) malloc ((BUFFER_SIZE + 1) * sizeof(char));
 
-	sprintf( buffer, "ACK %s\n", ctime(&mtime));
+	char time[20];
+	strftime(time, 20, "%Y-%m-%d %H:%M:%S", localtime(&mtime));
+	printf("[server] sending %s\n", time);
+	//sprintf( buffer, "ACK %s\n", ctime(&mtime));
+    sprintf(buffer, "ACK %s\n", time);
+
 
 	send_msg(sock, buffer, strlen(buffer));
 
@@ -1084,16 +1074,19 @@ void recv_status( int sock, char * buffer, time_t * mtime ) {
 
       if (n > 0) {
 
-		int hh, mm, ss;
+		int hh, mm, ss, y, m, d;
 
             struct tm when = {0};
+            
+            sscanf(buffer, "ACK %d-%d-%d %d:%d:%d", &y, &m, &d, &hh, &mm, &ss);
 
-            sscanf(buffer, "ACK %d:%d:%d", &hh, &mm, &ss);
-
+			when.tm_year = y - 1900;
+			when.tm_mon = m - 1;
+			when.tm_mday = d;
             when.tm_hour = hh;
             when.tm_min = mm;
             when.tm_sec = ss;
-
+            
             *mtime = mktime(&when);
       }
 }
@@ -1299,7 +1292,7 @@ int get_line(FILE * fd, char * hash, char * filename) {
 	if ((w = fgetc(fd)) == EOF) {
 
  #ifdef DEBUG_GETLINE
- printf("No more lines to read.");
+ printf("[%s] No more lines to read.\n", asker);
  fflush( stdout );
  #endif
       	return w;
@@ -1423,8 +1416,12 @@ void file_sync(int sock) {
 
 			/* The file doesn't exit on the client, GET and get the next line
 			for the server */
+			
+			printf("[%s] Detected different & newer file: %s\n", asker, server_filename);
 
 			request_get(sock, buffer, server_filename);
+			
+			printf("[%s] Downloading %s: %s\n", asker, server_filename, s_hex);
 
 			ser_n = get_line(server_file, s_hex, server_filename);
 
@@ -1440,11 +1437,16 @@ void file_sync(int sock) {
 
 				int last = request_query(sock, buffer, client_filename);
 
-				if (last == -1 ) {
+				if (last < 0 ) {
 
 					/* server has newer */
+					
+					printf("[%s] Detected different & newer file: %s\n", asker, server_filename);
 
 					request_get(sock, buffer, server_filename);
+					
+					printf("[%s] Downloading %s: %s\n", asker, server_filename, s_hex);
+
 
 				} else {
 
@@ -1481,8 +1483,12 @@ void file_sync(int sock) {
      get them from the server */
 
   while(ser_n != EOF) {
+  	
+  	printf("[%s] Detected different & newer file: %s\n", asker, server_filename);
 
   	request_get(sock, buffer, server_filename);
+  
+  	printf("[%s] Downloading %s: %s\n", asker, server_filename, s_hex);
 
 	ser_n = get_line(server_file, s_hex, server_filename);
 
@@ -1624,7 +1630,17 @@ void do_command(int newsock, char ** lines) {
 		unsigned char * hex = get_MD5(filename);
 		convert_hex_to_string(hex, buffer);
 
-		printf("[%s] Downloaded %s: %s\n", asker, filename, buffer);
+
+	  	
+		printf("[%s] Downloaded %s: ", asker, filename);
+		
+		// TODO: FIX BUFFER, AFTER RETURN, IT IS BAD - mby return from convert?
+		
+		int i;
+		for(i=0; i < strlen(buffer); i++)
+	    	printf("%c", buffer[i]);
+	
+	  	printf("\n");
 		fflush(stdout);
 
 	} else if (strncmp(lines[0], CMD_GET, 3) == 0) {
@@ -1745,11 +1761,6 @@ void run_server(int newsock, const struct sockaddr_in* client) {
 				free(lines);
 
 		}
-
-#ifdef DEBUG_SERVER
-printf("[%s] command completed\n", asker);
-fflush( stdout );
-#endif
 
 
 	} while (n > 0);

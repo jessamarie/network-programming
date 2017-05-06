@@ -11,6 +11,8 @@ gcc -g -Wall -o rsync barrej4_client_server.c -lssl -lcrypto
 ./rsync client/server [port]
 
 # IMPORTANT NOTES:
+ - if all files fail to sync with the server, run client again a few times;
+    it usually will succeed.
  - My implementation does not allow the server to know
  the hash of a file that it doesn't have. It will calculate
  this upon the next update of the file list.
