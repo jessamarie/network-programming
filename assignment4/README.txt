@@ -1,7 +1,7 @@
 Author: Jessica Marie Barre
-No Partner 
+No Partner
 Late days used: 2
-Due: Friday, May 5th 
+Due: Friday, May 5th
 
 
 Helpful Remarks:
@@ -11,30 +11,38 @@ gcc -g -Wall -o rsync barrej4_client_server.c -lssl -lcrypto
 ./rsync client/server [port]
 
 # IMPORTANT NOTES:
- - 
- - The following file/filetypes will be ignored as 
+ - My implementation does not allow the server to know
+ the hash of a file that it doesn't have. It will calculate
+ this upon the next update of the file list.
+ - The following file/filetypes will be ignored as
 implemented in the is_valid_file() method:
-       *	".", 
+       *	".",
        *	"..",
        *	".4220_file.list.txt",
        *	".4220_file_list.server.txt",
        *	the [a.out] file, or
        *    .pdf files
        *    .c files
- 
 
 
-# test cases passed:
 
-Assume server starts with no files and is running
+# testing:
 
-TC1: run client that contains all old versions of files
+I only used .txt files from size 0 to size 760000 to
+test this program.
 
-1. run client from /server_dir
-      a. sync /client_old files
-      b. sync /client_new files
-      c. sync /client_none files
-      d. sync /client_old files (should have the new ones)
+Assume at the beginning of each test run the server is started,
+runs the test run and contains no files.
+
+clients:
+      O : client with old files only
+      N : client with new files only
+      E : client with an empty directory
+      M : client with mixed only/new files
+
+Test runs: (run these clients sequentially)
+TC1: O (puts all to server) -> N (puts all to server) -> O (gets all from server) -> server exits
+TC2:
 
 # Sample output given below:
 
